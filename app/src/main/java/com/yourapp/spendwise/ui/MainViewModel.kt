@@ -310,6 +310,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun ignoreDuplicate(transaction: TransactionEntity) {
+        viewModelScope.launch {
+            val updated = repository.ignoreDuplicate(transaction.id)
+            if (updated) {
+                // Update UI state with a message optionally, and reload data
+                _uiState.update { it.copy(debugStatusMessage = "Transaction dismissed as duplicate.") }
+                loadCurrentMonth()
+            }
+        }
+    }
+
     fun restoreDeletedTransaction() {
         val pending = _uiState.value.pendingUndoDeleteTransaction ?: return
         viewModelScope.launch {

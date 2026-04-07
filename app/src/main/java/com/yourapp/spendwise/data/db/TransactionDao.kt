@@ -32,6 +32,9 @@ interface TransactionDao {
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteById(id: Long): Int
 
+    @Query("UPDATE transactions SET isIgnoredDuplicate = 1 WHERE id = :id")
+    suspend fun ignoreDuplicate(id: Long): Int
+
     @Query(
         """
         SELECT EXISTS(

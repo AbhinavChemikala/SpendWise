@@ -291,6 +291,10 @@ class TransactionRepository(context: Context) {
         transactionDao.deleteById(transactionId) > 0
     }
 
+    suspend fun ignoreDuplicate(transactionId: Long): Boolean = withContext(Dispatchers.IO) {
+        transactionDao.ignoreDuplicate(transactionId) > 0
+    }
+
     suspend fun restoreTransaction(transaction: TransactionEntity): Boolean = withContext(Dispatchers.IO) {
         transactionDao.insert(transaction.copy(id = 0L)) != -1L
     }
@@ -560,6 +564,7 @@ class TransactionRepository(context: Context) {
 
     private fun buildDuplicateInsights(transactions: List<TransactionEntity>): List<DuplicateInsight> {
         return transactions
+            .filter { !it.isIgnoredDuplicate }
             .groupBy {
                 Triple(
                     MerchantNormalizer.normalize(it.merchant, it.rawSms),

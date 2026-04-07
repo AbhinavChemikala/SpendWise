@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.CreditCard
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Home
@@ -84,6 +85,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Switch
@@ -266,7 +268,8 @@ fun SpendWiseApp(vm: MainViewModel) {
         val deleted = uiState.pendingUndoDeleteTransaction ?: return@LaunchedEffect
         val result = snackbarHostState.showSnackbar(
             message = "${deleted.merchant} deleted",
-            actionLabel = "Undo"
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Short
         )
         if (result == SnackbarResult.ActionPerformed) {
             vm.restoreDeletedTransaction()
@@ -368,6 +371,7 @@ fun SpendWiseApp(vm: MainViewModel) {
                     selectedTransaction = it
                     transactionDialogMode = TransactionDialogMode.EDIT
                 },
+                onRemoveDuplicateRequest = vm::ignoreDuplicate,
                 onSelectSummaryRange = vm::selectSummaryRange,
                 onOpenInsights = { vm.selectTab(SpendWiseTab.INSIGHTS) },
                 onOpenActivity = { vm.selectTab(SpendWiseTab.ACTIVITY) },
@@ -386,6 +390,7 @@ fun SpendWiseApp(vm: MainViewModel) {
                     selectedTransaction = it
                     transactionDialogMode = TransactionDialogMode.EDIT
                 },
+                onRemoveDuplicateRequest = vm::ignoreDuplicate,
                 onMonthClick = { showMonthPicker = true }
             )
 
@@ -468,6 +473,7 @@ private fun HomeScreen(
     onDeleteTransaction: (TransactionEntity) -> Unit,
     onOpenTransaction: (TransactionEntity) -> Unit,
     onEditTransaction: (TransactionEntity) -> Unit,
+    onRemoveDuplicateRequest: (TransactionEntity) -> Unit,
     onSelectSummaryRange: (SummaryRangeType) -> Unit,
     onOpenInsights: () -> Unit,
     onOpenActivity: () -> Unit,
@@ -520,6 +526,7 @@ private fun HomeScreen(
                 onDeleteRequest = { onDeleteTransaction(transaction) },
                 onEditRequest = { onEditTransaction(transaction) },
                 onOpenRequest = { onOpenTransaction(transaction) },
+                onRemoveDuplicateRequest = { onRemoveDuplicateRequest(transaction) },
                 isLikelyDuplicate = transaction.id in uiState.duplicateTransactionIds
             )
         }
@@ -533,6 +540,7 @@ private fun ActivityScreen(
     onDeleteTransaction: (TransactionEntity) -> Unit,
     onOpenTransaction: (TransactionEntity) -> Unit,
     onEditTransaction: (TransactionEntity) -> Unit,
+    onRemoveDuplicateRequest: (TransactionEntity) -> Unit,
     onMonthClick: () -> Unit
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -659,6 +667,7 @@ private fun ActivityScreen(
                     onDeleteRequest = { onDeleteTransaction(transaction) },
                     onEditRequest = { onEditTransaction(transaction) },
                     onOpenRequest = { onOpenTransaction(transaction) },
+                    onRemoveDuplicateRequest = { onRemoveDuplicateRequest(transaction) },
                     isLikelyDuplicate = transaction.id in uiState.duplicateTransactionIds
                 )
             }
@@ -2554,6 +2563,7 @@ private fun TransactionListItem(
     onDeleteRequest: (() -> Unit)? = null,
     onEditRequest: (() -> Unit)? = null,
     onOpenRequest: (() -> Unit)? = null,
+    onRemoveDuplicateRequest: (() -> Unit)? = null,
     isLikelyDuplicate: Boolean = false
 ) {
     val amountColor = when (transaction.type) {
@@ -2622,29 +2632,42 @@ private fun TransactionListItem(
                     Icon(iconForCategory(transaction.category), contentDescription = null, tint = colorForCategory(transaction.category))
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.Center
+                    ) {
                         Text(
                             transaction.merchant,
                             fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            modifier = Modifier.align(Alignment.CenterVertically)
                         )
-                    if (transaction.isVerifiedByAi) {
-                        AssistChip(
-                            onClick = {},
-                            label = { Text("AI") },
-                            leadingIcon = { Icon(Icons.Rounded.Psychology, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                            colors = AssistChipDefaults.assistChipColors(containerColor = AccentPurple.copy(alpha = 0.12f))
-                        )
+                        if (transaction.isVerifiedByAi) {
+                            AssistChip(
+                                onClick = {},
+                                label = { Text("AI") },
+                                leadingIcon = { Icon(Icons.Rounded.Psychology, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                                colors = AssistChipDefaults.assistChipColors(containerColor = AccentPurple.copy(alpha = 0.12f)),
+                                modifier = Modifier.height(24.dp)
+                            )
+                        }
+                        if (isLikelyDuplicate && onRemoveDuplicateRequest != null) {
+                            AssistChip(
+                                onClick = onRemoveDuplicateRequest,
+                                label = { Text("Duplicate") },
+                                leadingIcon = { Icon(Icons.Rounded.Close, contentDescription = "Not Duplicate", modifier = Modifier.size(14.dp)) },
+                                colors = AssistChipDefaults.assistChipColors(containerColor = AccentPink.copy(alpha = 0.12f)),
+                                modifier = Modifier.height(24.dp)
+                            )
+                        } else if (isLikelyDuplicate) {
+                             AssistChip(
+                                onClick = {},
+                                label = { Text("Duplicate") },
+                                colors = AssistChipDefaults.assistChipColors(containerColor = AccentPink.copy(alpha = 0.12f)),
+                                modifier = Modifier.height(24.dp)
+                            )
+                        }
                     }
-                    if (isLikelyDuplicate) {
-                        AssistChip(
-                            onClick = {},
-                            label = { Text("Duplicate") },
-                            colors = AssistChipDefaults.assistChipColors(containerColor = AccentPink.copy(alpha = 0.12f))
-                        )
-                    }
-                }
                     // Account label row
                     val label = transaction.accountLabel.ifBlank { transaction.bank }
                     Text(

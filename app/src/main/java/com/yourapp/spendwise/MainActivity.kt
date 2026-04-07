@@ -18,6 +18,12 @@ import com.yourapp.spendwise.sms.SpendWiseNotificationManager
 import com.yourapp.spendwise.ui.DashboardScreen
 import com.yourapp.spendwise.ui.MainViewModel
 import com.yourapp.spendwise.ui.SpendWiseTheme
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.ExistingPeriodicWorkPolicy
+import java.util.concurrent.TimeUnit
+import java.util.Calendar
+import com.yourapp.spendwise.background.DailySummaryWorker
 
 class MainActivity : ComponentActivity() {
 
@@ -27,6 +33,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         requestSmsPermissions()
         SpendWiseNotificationManager.ensureChannel(this)
+        scheduleDailySummaryWorker()
 
         GeminiNanoAnalyzer.ensureModelReady(
             onReady = {
@@ -72,6 +79,32 @@ class MainActivity : ComponentActivity() {
                 SMS_PERMISSION_REQUEST_CODE
             )
         }
+    }
+
+    private fun scheduleDailySummaryWorker() {
+        val currentDate = Calendar.getInstance()
+        val dueDate = Calendar.getInstance()
+
+        // Set execution around 10:00 PM
+        dueDate.set(Calendar.HOUR_OF_DAY, 22)
+        dueDate.set(Calendar.MINUTE, 0)
+        dueDate.set(Calendar.SECOND, 0)
+
+        if (dueDate.before(currentDate)) {
+            dueDate.add(Calendar.HOUR_OF_DAY, 24)
+        }
+
+        val timeDiff = dueDate.timeInMillis - currentDate.timeInMillis
+
+        val dailyWorkRequest = PeriodicWorkRequestBuilder<DailySummaryWorker>(24, TimeUnit.HOURS)
+            .setInitialDelay(timeDiff, TimeUnit.MILLISECONDS)
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "daily_summary",
+            ExistingPeriodicWorkPolicy.UPDATE,
+            dailyWorkRequest
+        )
     }
 
     companion object {

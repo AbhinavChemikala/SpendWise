@@ -32,5 +32,6 @@ data class TransactionEntity(
     val verificationSource: String = "Prefilter",
     val aiReason: String = "",
     val paymentMode: String = "Other",
-    val accountLabel: String = ""   // e.g. "HDFC Credit ••4521" or "PhonePe UPI"
+    val accountLabel: String = "",   // e.g. "HDFC Credit ••4521" or "PhonePe UPI"
+    val isIgnoredDuplicate: Boolean = false
 )

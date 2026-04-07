@@ -11,7 +11,11 @@ import androidx.core.content.ContextCompat
 import com.yourapp.spendwise.R
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
+import android.app.PendingIntent
+import android.content.Intent
+import com.yourapp.spendwise.MainActivity
 import java.text.NumberFormat
+import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.absoluteValue
 
@@ -58,7 +62,18 @@ object SpendWiseNotificationManager {
         context: Context,
         processed: Int,
         total: Int
-    ) = NotificationCompat.Builder(context, AI_PROCESSING_CHANNEL_ID)
+    ): android.app.Notification {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(context, AI_PROCESSING_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_stat_spendwise)
         .setContentTitle("SpendWise AI")
         .setContentText(
@@ -70,7 +85,9 @@ object SpendWiseNotificationManager {
         .setOnlyAlertOnce(true)
         .setSilent(true)
         .setPriority(NotificationCompat.PRIORITY_LOW)
+        .setContentIntent(pendingIntent)
         .build()
+    }
 
     fun showPendingReview(
         context: Context,
@@ -104,6 +121,7 @@ object SpendWiseNotificationManager {
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setContentIntent(getMainActivityPendingIntent(context))
         )
     }
 
@@ -148,6 +166,35 @@ object SpendWiseNotificationManager {
                 .setOngoing(false)
                 .setOnlyAlertOnce(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setContentIntent(getMainActivityPendingIntent(context))
+        )
+    }
+
+    fun showDailySummary(
+        context: Context,
+        totalSpent: Double,
+        transactionCount: Int
+    ) {
+        if (!canNotify(context)) return
+
+        val title = "Today's Summary"
+        val detail = if (totalSpent > 0) {
+            "You spent ${formatRupees(totalSpent)} today across $transactionCount transactions."
+        } else {
+            "No spends tracked today. Great job!"
+        }
+
+        notify(
+            context = context,
+            notificationId = 30_000, // Fixed ID for daily summary
+            builder = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_spendwise)
+                .setContentTitle(title)
+                .setContentText(detail)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setContentIntent(getMainActivityPendingIntent(context))
         )
     }
 
@@ -159,6 +206,18 @@ object SpendWiseNotificationManager {
 
     fun directNotificationId(rawSms: String, timestamp: Long): Int {
         return 10_000 + ("$rawSms-$timestamp").hashCode().absoluteValue % 10_000
+    }
+
+    private fun getMainActivityPendingIntent(context: Context): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
     private fun notify(
