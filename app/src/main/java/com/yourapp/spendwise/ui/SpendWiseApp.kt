@@ -238,7 +238,6 @@ fun SpendWiseApp(vm: MainViewModel) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showMonthPicker by rememberSaveable { mutableStateOf(false) }
-    var showManualAddDialog by rememberSaveable { mutableStateOf(false) }
     var transactionPendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var selectedTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
     var transactionDialogMode by rememberSaveable { mutableStateOf(TransactionDialogMode.VIEW) }
@@ -290,11 +289,11 @@ fun SpendWiseApp(vm: MainViewModel) {
         )
     }
 
-    if (showManualAddDialog) {
+    if (uiState.showManualAddDialog) {
         ManualTransactionDialog(
-            onDismiss = { showManualAddDialog = false },
+            onDismiss = vm::closeManualAddDialog,
             onSave = { amount, type, merchant, bank ->
-                showManualAddDialog = false
+                vm.closeManualAddDialog()
                 vm.addManualTransaction(amount, type, merchant, bank)
             }
         )
@@ -344,7 +343,7 @@ fun SpendWiseApp(vm: MainViewModel) {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showManualAddDialog = true },
+                onClick = vm::openManualAddDialog,
                 containerColor = AccentPurple,
                 contentColor = Color.White
             ) {

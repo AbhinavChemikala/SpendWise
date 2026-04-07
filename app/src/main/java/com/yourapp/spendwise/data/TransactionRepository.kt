@@ -12,6 +12,7 @@ import com.yourapp.spendwise.data.db.TransactionType
 import com.yourapp.spendwise.sms.SmsIntakeOutcome
 import com.yourapp.spendwise.sms.SmsIntakeManager
 import com.yourapp.spendwise.sms.SmsProcessor
+import com.yourapp.spendwise.widget.WidgetUpdater
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
@@ -251,7 +252,7 @@ class TransactionRepository(context: Context) {
         merchant: String,
         bank: String
     ) = withContext(Dispatchers.IO) {
-        transactionDao.insert(
+        val id = transactionDao.insert(
             TransactionFactory.create(
                 context = appContext,
                 amount = amount,
@@ -265,6 +266,8 @@ class TransactionRepository(context: Context) {
                 verificationSource = "Manual Entry"
             )
         )
+        WidgetUpdater.updateAll(appContext)
+        id
     }
 
     suspend fun updateTransaction(transaction: TransactionEntity): Boolean = withContext(Dispatchers.IO) {
@@ -284,11 +287,15 @@ class TransactionRepository(context: Context) {
                 merchant = transaction.merchant
             )
         )
-        transactionDao.update(normalized) > 0
+        val success = transactionDao.update(normalized) > 0
+        if (success) WidgetUpdater.updateAll(appContext)
+        success
     }
 
     suspend fun deleteTransaction(transactionId: Long): Boolean = withContext(Dispatchers.IO) {
-        transactionDao.deleteById(transactionId) > 0
+        val success = transactionDao.deleteById(transactionId) > 0
+        if (success) WidgetUpdater.updateAll(appContext)
+        success
     }
 
     suspend fun ignoreDuplicate(transactionId: Long): Boolean = withContext(Dispatchers.IO) {
@@ -296,7 +303,9 @@ class TransactionRepository(context: Context) {
     }
 
     suspend fun restoreTransaction(transaction: TransactionEntity): Boolean = withContext(Dispatchers.IO) {
-        transactionDao.insert(transaction.copy(id = 0L)) != -1L
+        val success = transactionDao.insert(transaction.copy(id = 0L)) != -1L
+        if (success) WidgetUpdater.updateAll(appContext)
+        success
     }
 
     suspend fun simulateIncomingSms(sender: String, body: String): SmsIntakeOutcome = withContext(Dispatchers.IO) {

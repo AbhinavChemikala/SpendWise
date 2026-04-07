@@ -96,7 +96,8 @@ data class DashboardUiState(
     val pendingUndoDeleteTransaction: TransactionEntity? = null,
     val debugStatusMessage: String? = null,
     val isImportingSms: Boolean = false,
-    val importProgress: Pair<Int, Int> = 0 to 0
+    val importProgress: Pair<Int, Int> = 0 to 0,
+    val showManualAddDialog: Boolean = false
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -128,6 +129,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectTab(tab: SpendWiseTab) {
         _uiState.update { it.copy(selectedTab = tab) }
+    }
+
+    fun openManualAddDialog() {
+        _uiState.update { it.copy(showManualAddDialog = true) }
+    }
+
+    fun closeManualAddDialog() {
+        _uiState.update { it.copy(showManualAddDialog = false) }
     }
 
     fun loadCurrentMonth() {

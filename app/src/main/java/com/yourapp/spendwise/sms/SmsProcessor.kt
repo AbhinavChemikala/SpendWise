@@ -7,6 +7,7 @@ import com.yourapp.spendwise.data.TransactionFactory
 import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.PendingSmsEntity
 import com.yourapp.spendwise.data.db.TransactionType
+import com.yourapp.spendwise.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -117,6 +118,7 @@ class SmsProcessor(context: Context) {
                     var insertedId = -1L
                     withContext(Dispatchers.IO) {
                         insertedId = transactionDao.insert(transaction)
+                        WidgetUpdater.updateAll(appContext)
                         pendingSmsDao.deleteById(pending.id)
                         pending.reviewEventId?.let { eventId ->
                             reviewDao.updateOutcome(

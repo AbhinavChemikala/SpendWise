@@ -24,6 +24,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import java.util.concurrent.TimeUnit
 import java.util.Calendar
 import com.yourapp.spendwise.background.DailySummaryWorker
+import android.content.Intent
 
 class MainActivity : ComponentActivity() {
 
@@ -44,6 +45,8 @@ class MainActivity : ComponentActivity() {
             }
         )
 
+        handleIntent(intent)
+
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             val systemDark = isSystemInDarkTheme()
@@ -55,6 +58,17 @@ class MainActivity : ComponentActivity() {
             SpendWiseTheme(isDark = isDark) {
                 DashboardScreen()
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == ACTION_ADD_TRANSACTION) {
+            viewModel.openManualAddDialog()
         }
     }
 
@@ -110,5 +124,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val SMS_PERMISSION_REQUEST_CODE = 101
+        const val ACTION_ADD_TRANSACTION = "com.yourapp.spendwise.ACTION_ADD_TRANSACTION"
     }
 }

@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">SpendWise</string>
+    <string name="widget_small_desc">SpendWise Small Widget</string>
+    <string name="widget_medium_desc">SpendWise Medium Widget</string>
+    <string name="widget_large_desc">SpendWise Large Widget</string>
 </resources>
