@@ -1,0 +1,85 @@
+
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:306:    }
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:307:
+> app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:308:    suspend fun importExistingSms(
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:309:        onProgress: (processed: Int, total: Int) -> Unit
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:310:    ): SmsImportSummary = withContext(Dispatchers.IO) {
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:311:        val projection = arrayOf(
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:312:            Telephony.Sms.ADDRESS,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:313:            Telephony.Sms.BODY,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:314:            Telephony.Sms.DATE
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:315:        )
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:316:        val sortOrder = "${Telephony.Sms.DATE} ASC"
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:317:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:318:        appContext.contentResolver.query(
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:319:            Telephony.Sms.Inbox.CONTENT_URI,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:320:            projection,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:321:            null,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:322:            null,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:323:            sortOrder
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:324:        )?.use { cursor ->
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:325:            val senderIndex = cursor.getColumnIndex(Telephony.Sms.ADDRESS)
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:326:            val bodyIndex = cursor.getColumnIndex(Telephony.Sms.BODY)
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:327:            val dateIndex = cursor.getColumnIndex(Telephony.Sms.DATE)
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:328:            val total = cursor.count.coerceAtLeast(0)
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:329:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:330:            var scanned = 0
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:331:            var importedInstantly = 0
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:332:            var queuedForAi = 0
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:333:            var skipped = 0
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:334:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:335:            while (cursor.moveToNext()) {
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:336:                val sender = cursor.getNullableString(senderIndex).orEmpty().trim()
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:337:                val body = cursor.getNullableString(bodyIndex).orEmpty().trim()
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:338:                val timestamp = cursor.getNullableLong(dateIndex) ?: System.currentTimeMillis()
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:339:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:340:                scanned += 1
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:341:                onProgress(scanned, total)
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:342:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:343:                if (body.isBlank()) {
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:344:                    skipped += 1
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:345:                    continue
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:346:                }
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:347:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:348:                when (
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:349:                    SmsIntakeManager.ingest(
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:350:                        context = appContext,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:351:                        sender = sender,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:352:                        body = body,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:353:                        timestamp = timestamp,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:354:                        eventSource = "IMPORT",
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:355:                        emitNotifications = false,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:356:                        emitPendingEvent = false
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:357:                    )
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:358:                ) {
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:359:                    is SmsIntakeOutcome.Confirmed -> importedInstantly += 1
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:360:                    is SmsIntakeOutcome.Pending -> queuedForAi += 1
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:361:                    SmsIntakeOutcome.Discarded -> skipped += 1
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:362:                }
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:363:            }
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:364:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:365:            onProgress(total, total)
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:366:            SmsImportSummary(
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:367:                scanned = scanned,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:368:                importedInstantly = importedInstantly,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:369:                queuedForAi = queuedForAi,
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:370:                skipped = skipped
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:371:            )
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:372:        } ?: SmsImportSummary()
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:373:    }
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:374:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:375:    fun sendDebugSms(phoneNumber: String, body: String) {
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:376:        appContext.getSystemService(SmsManager::class.java)
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:377:            ?.sendTextMessage(phoneNumber, null, body, null, null)
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:378:            ?: error("SMS service unavailable on this device.")
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:379:    }
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:380:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:381:    fun isDebugModeEnabled(): Boolean = settingsStore.isDebugModeEnabled()
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:382:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:383:    fun setDebugModeEnabled(enabled: Boolean) {
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:384:        settingsStore.setDebugModeEnabled(enabled)
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:385:    }
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:386:
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:387:    fun getDebugPhoneNumber(): String = settingsStore.getDebugPhoneNumber()
+  app\src\main\java\com\yourapp\spendwise\data\TransactionRepository.kt:388:
+

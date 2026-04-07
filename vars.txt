@@ -1,0 +1,78 @@
+private val AppBackground = Color(0xFFF8EFE5)
+private val AccentPink = Color(0xFFFF577A)
+private val AccentTeal = Color(0xFF24B6D3)
+private val AccentPurple = Color(0xFF6F49FF)
+private val AccentGreen = Color(0xFF2E8B57)
+private val AccentAmber = Color(0xFFF5A623)
+private val SoftCard = Color(0xFFFFFBF7)
+private val SoftOutline = Color(0xFFE8DED3)
+private val MutedText = Color(0xFF948DA2)
+private data class DebugSmsTemplate(
+private data class AdvancedFilterState(
+private val AdvancedFilterStateSaver: Saver<AdvancedFilterState, Any> = listSaver(
+private enum class TransactionDialogMode {
+private val debugTemplates = listOf(
+private fun HomeScreen(
+private fun ActivityScreen(
+private fun InsightsScreen(
+private fun SettingsScreen(
+private fun SpendWiseBottomBar(
+private fun ScreenHeader(
+private fun StatusCard(uiState: DashboardUiState) {
+private fun SummaryRangeCard(
+private fun HeroSummaryCard(uiState: DashboardUiState) {
+private fun SavingsScoreCard(
+private fun StatBlock(
+private fun BudgetProgressCard(progress: List<BudgetProgress>) {
+private fun InsightsPreviewCard(
+private fun SectionTitle(
+private fun LegendRow(color: Color, label: String, percent: Int) {
+private fun CompactAmountCard(
+private fun FactsCard(facts: List<InsightFact>) {
+private fun SpecialTrackingCard(uiState: DashboardUiState) {
+private fun SpendingBreakdownCard(totalSpent: Double, topCategories: List<CategoryTotal>) {
+private fun PaymentModeCard(paymentModes: List<PaymentModeTotal>, totalSpent: Double) {
+private fun TopCategoriesCard(topCategories: List<CategoryTotal>, totalSpent: Double) {
+private fun MerchantAnalyticsCard(topMerchants: List<MerchantAnalytics>) {
+private fun CompareMetricsCard(
+private fun IncomeTrendCard(incomeTrend: IncomeTrendSummary) {
+private fun TopCategoryRow(category: CategoryTotal, totalSpent: Double) {
+private fun RecurringInsightsCard(
+private fun AnomalyAlertsCard(alerts: List<AnomalyAlert>) {
+private fun CashflowCard(cashflowDays: List<CashflowDay>) {
+private fun DuplicateInsightsCard(duplicateInsights: List<DuplicateInsight>) {
+private fun TrendCard(
+private fun FilterBar(
+private fun CategoryManagementCard(
+private fun RuleManagementCard(
+private fun BudgetManagementCard(
+private fun BudgetEditorDialog(
+private fun ExpandableReviewCard(
+private fun SmsReviewCard(event: SmsReviewEntity) {
+private fun CategoryEditorDialog(
+private fun RuleEditorDialog(
+private fun TransactionDetailDialog(
+private fun DetailLabelValue(label: String, value: String) {
+private fun SwipeBackground(
+private fun TransactionListItem(
+private fun DebugTemplateCard(
+private fun EmptyStateCard(message: String) {
+private fun SegmentedToggle(
+private fun DonutChart(values: List<CategoryTotal>, colors: List<Color>) {
+private fun TrendChart(
+private fun MonthPickerDialog(
+private fun ManualTransactionDialog(
+private fun iconForCategory(category: String) = when (category) {
+private fun colorForCategory(category: String) = when (category) {
+private fun colorForPaymentMode(mode: String) = when (mode) {
+private fun alertColor(severity: String) = when (severity) {
+private fun donutColors(count: Int): List<Color> {
+private fun availableCategories(
+private fun buildRuleSummary(rule: TransactionRule): String {
+private fun paymentModeFor(merchant: String, rawSms: String): String {
+private fun formatRupees(amount: Double): String =
+private fun formatCompactCurrency(amount: Double): String {
+private fun formatDate(timestamp: Long): String =
+private fun formatMonth(year: Int, month: Int): String =
+private fun Double?.orZero(): Double = this ?: 0.0
+private fun Context.findActivity(): Activity? {

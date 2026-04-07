@@ -1,0 +1,81 @@
+
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:357:    ) { innerPadding ->
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:358:        when (uiState.selectedTab) {
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:359:            SpendWiseTab.HOME -> HomeScreen(
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:360:                modifier = Modifier.padding(innerPadding),
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:361:                uiState = uiState,
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:362:                onDeleteTransaction = { transactionPendingDelete = it },
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:363:                onOpenTransaction = {
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:364:                    selectedTransaction = it
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:365:                    transactionDialogMode = TransactionDialogMode.VIEW
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:366:                },
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:367:                onEditTransaction = {
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:368:                    selectedTransaction = it
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:369:                    transactionDialogMode = TransactionDialogMode.EDIT
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:370:                },
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:371:                onSelectSummaryRange = vm::selectSummaryRange,
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:372:                onOpenInsights = { vm.selectTab(SpendWiseTab.INSIGHTS) },
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:373:                onOpenActivity = { vm.selectTab(SpendWiseTab.ACTIVITY) },
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:374:                onMonthClick = { showMonthPicker = true }
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:375:            )
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:376:
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:377:            SpendWiseTab.ACTIVITY -> ActivityScreen(
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:378:                modifier = Modifier.padding(innerPadding),
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:379:                uiState = uiState,
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:380:                onDeleteTransaction = { transactionPendingDelete = it },
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:381:                onOpenTransaction = {
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:382:                    selectedTransaction = it
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:383:                    transactionDialogMode = TransactionDialogMode.VIEW
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:384:                },
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:385:                onEditTransaction = {
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:386:                    selectedTransaction = it
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:387:                    transactionDialogMode = TransactionDialogMode.EDIT
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:388:                },
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:389:                onMonthClick = { showMonthPicker = true }
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:390:            )
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:391:
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:392:            SpendWiseTab.INSIGHTS -> InsightsScreen(
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:393:                modifier = Modifier.padding(innerPadding),
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:394:                uiState = uiState,
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:395:                onSelectSummaryRange = vm::selectSummaryRange,
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:396:                onMonthClick = { showMonthPicker = true }
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:397:            )
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:398:
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:399:            SpendWiseTab.SETTINGS -> SettingsScreen(
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:400:                modifier = Modifier.padding(innerPadding),
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:401:                uiState = uiState,
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:402:                onScanExistingSms = {
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:403:                    if (ContextCompat.checkSelfPermission(
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:404:                            context,
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:405:                            Manifest.permission.READ_SMS
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:406:                        ) != PackageManager.PERMISSION_GRANTED
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:407:                    ) {
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:408:                        context.findActivity()?.let { activity ->
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:409:                            ActivityCompat.requestPermissions(
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:410:                                activity,
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:411:                                arrayOf(Manifest.permission.READ_SMS),
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:412:                                103
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:413:                            )
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:414:                        }
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:931:    NavigationBar(containerColor = SoftCard, tonalElevation = 8.dp) {
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:932:        listOf(
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:933:            SpendWiseTab.HOME to Pair("Home", Icons.Rounded.Home),
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:934:            SpendWiseTab.ACTIVITY to Pair("Activity", Icons.AutoMirrored.Rounded.ReceiptLong),
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:935:            SpendWiseTab.INSIGHTS to Pair("Insights", Icons.Rounded.PieChart),
+> app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:936:            SpendWiseTab.SETTINGS to Pair("Settings", Icons.Rounded.Settings)
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:937:        ).forEach { (tab, content) ->
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:938:            NavigationBarItem(
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:939:                selected = selectedTab == tab,
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:940:                onClick = { onSelected(tab) },
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:941:                icon = { Icon(content.second, contentDescription = content.first) },
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:942:                label = { Text(content.first) }
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:943:            )
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:944:        }
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:945:    }
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:946:}
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:947:
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:948:@Composable
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:949:private fun ScreenHeader(
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:950:    title: String,
+  app\src\main\java\com\yourapp\spendwise\ui\SpendWiseApp.kt:951:    subtitle: String,
+

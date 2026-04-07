@@ -1,0 +1,43 @@
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:kspDebugKotlin UP-TO-DATE
+
+> Task :app:compileDebugKotlin FAILED
+e: file:///C:/Users/Abhinav/Downloads/SpendWise/app/src/main/java/com/yourapp/spendwise/ui/AiReviewScreen.kt:35:13 Cannot access 'fun ScreenHeader(title: String, subtitle: String, monthLabel: String? = ..., onMonthClick: (() -> Unit)? = ...): Unit': it is private in file.
+e: file:///C:/Users/Abhinav/Downloads/SpendWise/app/src/main/java/com/yourapp/spendwise/ui/AiReviewScreen.kt:43:17 Cannot access 'fun EmptyStateCard(message: String): Unit': it is private in file.
+e: file:///C:/Users/Abhinav/Downloads/SpendWise/app/src/main/java/com/yourapp/spendwise/ui/AiReviewScreen.kt:77:33 Cannot access 'val AccentTeal: Color': it is private in file.
+e: file:///C:/Users/Abhinav/Downloads/SpendWise/app/src/main/java/com/yourapp/spendwise/ui/AiReviewScreen.kt:118:33 Cannot access 'val SoftCard: Color': it is private in file.
+e: file:///C:/Users/Abhinav/Downloads/SpendWise/app/src/main/java/com/yourapp/spendwise/ui/AiReviewScreen.kt:130:33 Cannot access 'val MutedText: Color': it is private in file.
+e: file:///C:/Users/Abhinav/Downloads/SpendWise/app/src/main/java/com/yourapp/spendwise/ui/AiReviewScreen.kt:133:43 Cannot access 'val AccentTeal: Color': it is private in file.
+e: file:///C:/Users/Abhinav/Downloads/SpendWise/app/src/main/java/com/yourapp/spendwise/ui/AiReviewScreen.kt:134:42 Cannot access 'val AccentPink: Color': it is private in file.
+e: file:///C:/Users/Abhinav/Downloads/SpendWise/app/src/main/java/com/yourapp/spendwise/ui/AiReviewScreen.kt:135:33 Cannot access 'val AccentAmber: Color': it is private in file.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 9s
+15 actionable tasks: 1 executed, 14 up-to-date
