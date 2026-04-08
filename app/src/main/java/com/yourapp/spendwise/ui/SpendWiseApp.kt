@@ -61,6 +61,7 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -436,6 +437,8 @@ fun SpendWiseApp(vm: MainViewModel) {
                 onToggleCloudAi = vm::toggleCloudAi,
                 onUpdateCloudAiApiKey = vm::updateCloudAiApiKey,
                 onSetThemeMode = vm::setThemeMode,
+                onToggleDailyReminder = vm::toggleDailyReminder,
+                onSetDailyReminderTime = vm::setDailyReminderTime,
                 onPhoneChange = vm::updateDebugPhoneNumber,
                 onSimulateTemplate = { template ->
                     vm.simulateIncomingSms(template.sender, template.body, template.title)
@@ -769,6 +772,8 @@ private fun SettingsScreen(
     onToggleCloudAi: (Boolean) -> Unit,
     onUpdateCloudAiApiKey: (String) -> Unit,
     onSetThemeMode: (String) -> Unit,
+    onToggleDailyReminder: (Boolean) -> Unit,
+    onSetDailyReminderTime: (Int, Int) -> Unit,
     onPhoneChange: (String) -> Unit,
     onSimulateTemplate: (DebugSmsTemplate) -> Unit,
     onSendTemplate: (DebugSmsTemplate) -> Unit
@@ -837,6 +842,15 @@ private fun SettingsScreen(
                     )
                 }
             }
+        }
+        item {
+            DailyReminderCard(
+                enabled = uiState.dailyReminderEnabled,
+                hour = uiState.dailyReminderHour,
+                minute = uiState.dailyReminderMinute,
+                onToggle = onToggleDailyReminder,
+                onTimeChange = onSetDailyReminderTime
+            )
         }
         // ── Theme Toggle ────────────────────────────────────────────────────────
         item {
@@ -1188,6 +1202,148 @@ private fun StatusCard(uiState: DashboardUiState) {
             }
         }
     }
+}
+
+@Composable
+private fun DailyReminderCard(
+    enabled: Boolean,
+    hour: Int,
+    minute: Int,
+    onToggle: (Boolean) -> Unit,
+    onTimeChange: (Int, Int) -> Unit
+) {
+    var showTimeDialog by rememberSaveable { mutableStateOf(false) }
+    val formattedTime = formatReminderTime(hour, minute)
+
+    if (showTimeDialog) {
+        ReminderTimeDialog(
+            initialHour = hour,
+            initialMinute = minute,
+            onDismiss = { showTimeDialog = false },
+            onSave = { selectedHour, selectedMinute ->
+                showTimeDialog = false
+                onTimeChange(selectedHour, selectedMinute)
+            }
+        )
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text("DAILY REMINDER", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Black)
+            Text(
+                text = "Get a daily check-in with today's spend total and transaction count.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AssistChip(
+                    onClick = { onToggle(!enabled) },
+                    label = { Text(if (enabled) "Reminder On" else "Reminder Off") },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = if (enabled) AccentTeal.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                )
+                Text(
+                    text = if (enabled) "Every day at $formattedTime" else "Daily summary is paused",
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Reminder time", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                        Text(formattedTime, fontWeight = FontWeight.Black)
+                        Text(
+                            text = ZoneId.systemDefault().id,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    TextButton(onClick = { showTimeDialog = true }) {
+                        Text("Change time")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReminderTimeDialog(
+    initialHour: Int,
+    initialMinute: Int,
+    onDismiss: () -> Unit,
+    onSave: (Int, Int) -> Unit
+) {
+    var hourText by rememberSaveable { mutableStateOf(initialHour.coerceIn(0, 23).toString().padStart(2, '0')) }
+    var minuteText by rememberSaveable { mutableStateOf(initialMinute.coerceIn(0, 59).toString().padStart(2, '0')) }
+    val parsedHour = hourText.toIntOrNull()
+    val parsedMinute = minuteText.toIntOrNull()
+    val isValid = parsedHour != null && parsedHour in 0..23 && parsedMinute != null && parsedMinute in 0..59
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Daily reminder time") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Use 24-hour time. The reminder uses this phone's current timezone: ${ZoneId.systemDefault().id}.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = hourText,
+                        onValueChange = { hourText = it.filter(Char::isDigit).take(2) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        label = { Text("Hour") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    OutlinedTextField(
+                        value = minuteText,
+                        onValueChange = { minuteText = it.filter(Char::isDigit).take(2) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        label = { Text("Minute") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                }
+                Text(
+                    text = if (isValid) {
+                        "Reminder will run at ${formatReminderTime(parsedHour ?: 0, parsedMinute ?: 0)}."
+                    } else {
+                        "Enter an hour from 0-23 and minute from 0-59."
+                    },
+                    color = if (isValid) AccentPurple else AccentPink,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = isValid,
+                onClick = { onSave(parsedHour ?: 0, parsedMinute ?: 0) }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
@@ -3088,6 +3244,10 @@ private fun formatCompactCurrency(amount: Double): String {
 private fun formatDate(timestamp: Long): String =
     LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("dd MMM, hh:mm a"))
+
+private fun formatReminderTime(hour: Int, minute: Int): String =
+    java.time.LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59))
+        .format(DateTimeFormatter.ofPattern("hh:mm a"))
 
 private fun formatMonth(year: Int, month: Int): String =
     YearMonth.of(year, month).format(DateTimeFormatter.ofPattern("MMM yyyy"))

@@ -48,6 +48,23 @@ class SettingsStore(context: Context) {
         prefs.edit().putString(KEY_THEME_MODE, mode).apply()
     }
 
+    fun isDailyReminderEnabled(): Boolean = prefs.getBoolean(KEY_DAILY_REMINDER_ENABLED, true)
+
+    fun setDailyReminderEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DAILY_REMINDER_ENABLED, enabled).apply()
+    }
+
+    fun getDailyReminderHour(): Int = prefs.getInt(KEY_DAILY_REMINDER_HOUR, 22).coerceIn(0, 23)
+
+    fun getDailyReminderMinute(): Int = prefs.getInt(KEY_DAILY_REMINDER_MINUTE, 0).coerceIn(0, 59)
+
+    fun setDailyReminderTime(hour: Int, minute: Int) {
+        prefs.edit()
+            .putInt(KEY_DAILY_REMINDER_HOUR, hour.coerceIn(0, 23))
+            .putInt(KEY_DAILY_REMINDER_MINUTE, minute.coerceIn(0, 59))
+            .apply()
+    }
+
     fun getCustomCategories(): List<CustomCategory> {
         return readList<CustomCategory>(KEY_CUSTOM_CATEGORIES)
             .mapNotNull { item ->
@@ -145,5 +162,8 @@ class SettingsStore(context: Context) {
         private const val KEY_CLOUD_AI_ENABLED = "cloud_ai_enabled"
         private const val KEY_CLOUD_AI_API_KEY = "cloud_ai_api_key"
         private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_DAILY_REMINDER_ENABLED = "daily_reminder_enabled"
+        private const val KEY_DAILY_REMINDER_HOUR = "daily_reminder_hour"
+        private const val KEY_DAILY_REMINDER_MINUTE = "daily_reminder_minute"
     }
 }

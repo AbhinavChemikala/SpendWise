@@ -85,6 +85,9 @@ data class DashboardUiState(
     val isCloudAiEnabled: Boolean = false,
     val cloudAiApiKey: String = "",
     val themeMode: String = "system",  // "system", "light", "dark"
+    val dailyReminderEnabled: Boolean = true,
+    val dailyReminderHour: Int = 22,
+    val dailyReminderMinute: Int = 0,
     val debugPhoneNumber: String = "",
     val customCategories: List<CustomCategory> = emptyList(),
     val transactionRules: List<TransactionRule> = emptyList(),
@@ -110,6 +113,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isCloudAiEnabled = repository.isCloudAiEnabled(),
             cloudAiApiKey = repository.getCloudAiApiKey(),
             themeMode = repository.getThemeMode(),
+            dailyReminderEnabled = repository.isDailyReminderEnabled(),
+            dailyReminderHour = repository.getDailyReminderHour(),
+            dailyReminderMinute = repository.getDailyReminderMinute(),
             debugPhoneNumber = repository.getDebugPhoneNumber()
         )
     )
@@ -245,6 +251,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setThemeMode(mode: String) {
         repository.setThemeMode(mode)
         _uiState.update { it.copy(themeMode = mode) }
+    }
+
+    fun toggleDailyReminder(enabled: Boolean) {
+        repository.setDailyReminderEnabled(enabled)
+        _uiState.update {
+            it.copy(
+                dailyReminderEnabled = enabled,
+                debugStatusMessage = if (enabled) "Daily reminder turned on." else "Daily reminder turned off."
+            )
+        }
+    }
+
+    fun setDailyReminderTime(hour: Int, minute: Int) {
+        repository.setDailyReminderTime(hour, minute)
+        _uiState.update {
+            it.copy(
+                dailyReminderHour = hour.coerceIn(0, 23),
+                dailyReminderMinute = minute.coerceIn(0, 59),
+                dailyReminderEnabled = repository.isDailyReminderEnabled(),
+                debugStatusMessage = "Daily reminder time updated."
+            )
+        }
     }
 
     fun updateDebugPhoneNumber(phoneNumber: String) {

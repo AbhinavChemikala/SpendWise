@@ -33,6 +33,8 @@ class DailySummaryWorker(
             transactionCount = count
         )
 
+        DailyReminderScheduler.scheduleAfterRun(applicationContext)
+
         Result.success()
     }
 }

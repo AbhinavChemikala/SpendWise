@@ -3,6 +3,7 @@ package com.yourapp.spendwise.data
 import android.content.Context
 import android.provider.Telephony
 import android.telephony.SmsManager
+import com.yourapp.spendwise.background.DailyReminderScheduler
 import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.CategoryTotal
 import com.yourapp.spendwise.data.db.MonthlySummary
@@ -419,6 +420,22 @@ class TransactionRepository(context: Context) {
 
     fun setThemeMode(mode: String) {
         settingsStore.setThemeMode(mode)
+    }
+
+    fun isDailyReminderEnabled(): Boolean = settingsStore.isDailyReminderEnabled()
+
+    fun setDailyReminderEnabled(enabled: Boolean) {
+        settingsStore.setDailyReminderEnabled(enabled)
+        DailyReminderScheduler.scheduleNext(appContext)
+    }
+
+    fun getDailyReminderHour(): Int = settingsStore.getDailyReminderHour()
+
+    fun getDailyReminderMinute(): Int = settingsStore.getDailyReminderMinute()
+
+    fun setDailyReminderTime(hour: Int, minute: Int) {
+        settingsStore.setDailyReminderTime(hour, minute)
+        DailyReminderScheduler.scheduleNext(appContext)
     }
 
     fun getDebugPhoneNumber(): String = settingsStore.getDebugPhoneNumber()
