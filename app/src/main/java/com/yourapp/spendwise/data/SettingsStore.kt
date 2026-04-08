@@ -65,6 +65,27 @@ class SettingsStore(context: Context) {
             .apply()
     }
 
+    fun getHomeCardOrder(): List<String> {
+        val saved = readList<String>(KEY_HOME_CARD_ORDER)
+        return normalizeHomeCardOrder(saved)
+    }
+
+    fun setHomeCardOrder(order: List<String>) {
+        writeList(KEY_HOME_CARD_ORDER, normalizeHomeCardOrder(order))
+    }
+
+    fun resetHomeCardOrder() {
+        prefs.edit().remove(KEY_HOME_CARD_ORDER).apply()
+    }
+
+    fun getHiddenHomeCardIds(): Set<String> {
+        return normalizeHomeCardIds(readList<String>(KEY_HOME_HIDDEN_CARD_IDS)).toSet()
+    }
+
+    fun setHiddenHomeCardIds(hiddenCardIds: Set<String>) {
+        writeList(KEY_HOME_HIDDEN_CARD_IDS, normalizeHomeCardIds(hiddenCardIds.toList()))
+    }
+
     fun getCustomCategories(): List<CustomCategory> {
         return readList<CustomCategory>(KEY_CUSTOM_CATEGORIES)
             .mapNotNull { item ->
@@ -151,6 +172,20 @@ class SettingsStore(context: Context) {
         prefs.edit().putString(key, gson.toJson(items)).apply()
     }
 
+    private fun normalizeHomeCardOrder(order: List<String>): List<String> {
+        val valid = DEFAULT_HOME_CARD_ORDER.toSet()
+        return order
+            .filter { it in valid }
+            .distinct() + DEFAULT_HOME_CARD_ORDER.filterNot { it in order }
+    }
+
+    private fun normalizeHomeCardIds(ids: List<String>): List<String> {
+        val valid = DEFAULT_HOME_CARD_ORDER.toSet()
+        return ids
+            .filter { it in valid }
+            .distinct()
+    }
+
     companion object {
         private const val PREFS_NAME = "spendwise_settings"
         private const val KEY_DEBUG_MODE = "debug_mode_enabled"
@@ -165,5 +200,19 @@ class SettingsStore(context: Context) {
         private const val KEY_DAILY_REMINDER_ENABLED = "daily_reminder_enabled"
         private const val KEY_DAILY_REMINDER_HOUR = "daily_reminder_hour"
         private const val KEY_DAILY_REMINDER_MINUTE = "daily_reminder_minute"
+        private const val KEY_HOME_CARD_ORDER = "home_card_order"
+        private const val KEY_HOME_HIDDEN_CARD_IDS = "home_hidden_card_ids"
+
+        private val DEFAULT_HOME_CARD_ORDER = listOf(
+            "status",
+            "quick_summary",
+            "hero_summary",
+            "savings_score",
+            "budgets",
+            "anomaly_alerts",
+            "cashflow",
+            "insights_preview",
+            "recent_transactions"
+        )
     }
 }

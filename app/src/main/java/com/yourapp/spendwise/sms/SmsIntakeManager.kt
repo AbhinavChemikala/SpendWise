@@ -5,6 +5,7 @@ import com.yourapp.spendwise.data.TransactionFactory
 import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.PendingSmsEntity
 import com.yourapp.spendwise.data.db.SmsReviewEntity
+import com.yourapp.spendwise.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -71,6 +72,7 @@ object SmsIntakeManager {
                 )
                 val insertedId = transactionDao.insert(transaction)
                 if (insertedId != -1L) {
+                    WidgetUpdater.updateAll(appContext)
                     reviewDao.insert(
                         SmsReviewEntity(
                             sender = sender,
@@ -121,6 +123,7 @@ object SmsIntakeManager {
                     )
                     val insertedId = transactionDao.insert(transaction)
                     if (insertedId != -1L) {
+                        WidgetUpdater.updateAll(appContext)
                         reviewDao.insert(
                             SmsReviewEntity(
                                 sender = sender,

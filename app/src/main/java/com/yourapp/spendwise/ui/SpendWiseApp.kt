@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.PackageManager
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,11 +18,15 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
@@ -60,14 +65,15 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -120,6 +126,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -175,6 +182,42 @@ private data class AdvancedFilterState(
     val minAmount: String = "",
     val maxAmount: String = "",
     val aiOnly: Boolean = false
+)
+
+private object HomeCardId {
+    const val STATUS = "status"
+    const val QUICK_SUMMARY = "quick_summary"
+    const val HERO_SUMMARY = "hero_summary"
+    const val SAVINGS_SCORE = "savings_score"
+    const val BUDGETS = "budgets"
+    const val ANOMALY_ALERTS = "anomaly_alerts"
+    const val CASHFLOW = "cashflow"
+    const val INSIGHTS_PREVIEW = "insights_preview"
+    const val RECENT_TRANSACTIONS = "recent_transactions"
+}
+
+private val DefaultHomeCardOrder = listOf(
+    HomeCardId.STATUS,
+    HomeCardId.QUICK_SUMMARY,
+    HomeCardId.HERO_SUMMARY,
+    HomeCardId.SAVINGS_SCORE,
+    HomeCardId.BUDGETS,
+    HomeCardId.ANOMALY_ALERTS,
+    HomeCardId.CASHFLOW,
+    HomeCardId.INSIGHTS_PREVIEW,
+    HomeCardId.RECENT_TRANSACTIONS
+)
+
+private val HomeCardLabels = mapOf(
+    HomeCardId.STATUS to "Status",
+    HomeCardId.QUICK_SUMMARY to "Quick Summary",
+    HomeCardId.HERO_SUMMARY to "Total Expenses",
+    HomeCardId.SAVINGS_SCORE to "Savings Score",
+    HomeCardId.BUDGETS to "Budgets",
+    HomeCardId.ANOMALY_ALERTS to "Alerts",
+    HomeCardId.CASHFLOW to "Cashflow",
+    HomeCardId.INSIGHTS_PREVIEW to "Insights",
+    HomeCardId.RECENT_TRANSACTIONS to "Recent Transactions"
 )
 
 private val AdvancedFilterStateSaver: Saver<AdvancedFilterState, Any> = listSaver(
@@ -330,12 +373,22 @@ fun SpendWiseApp(vm: MainViewModel) {
             transaction = transaction,
             initialMode = transactionDialogMode,
             availableCategories = availableCategories(uiState.customCategories, uiState.transactions, transaction.category),
+            isFindingSimilarTransactions = uiState.isFindingSimilarTransactions &&
+                uiState.similarTransactionSourceId == transaction.id,
+            similarTransactions = if (uiState.similarTransactionSourceId == transaction.id) {
+                uiState.similarTransactions
+            } else {
+                emptyList()
+            },
             onDismiss = { selectedTransaction = null },
             onSave = { updated ->
                 vm.updateTransaction(updated)
                 selectedTransaction = updated
                 transactionDialogMode = TransactionDialogMode.VIEW
-            }
+            },
+            onFindSimilar = vm::findSimilarTransactions,
+            onClearSimilar = vm::clearSimilarTransactions,
+            onApplyToSimilar = vm::applyTransactionChangesToSimilar
         )
     }
 
@@ -375,7 +428,9 @@ fun SpendWiseApp(vm: MainViewModel) {
                 onSelectSummaryRange = vm::selectSummaryRange,
                 onOpenInsights = { vm.selectTab(SpendWiseTab.INSIGHTS) },
                 onOpenActivity = { vm.selectTab(SpendWiseTab.ACTIVITY) },
-                onMonthClick = { showMonthPicker = true }
+                onMonthClick = { showMonthPicker = true },
+                onUpdateHomeCardOrder = vm::updateHomeCardOrder,
+                onToggleHomeCardVisibility = vm::toggleHomeCardVisibility
             )
 
             SpendWiseTab.ACTIVITY -> ActivityScreen(
@@ -479,8 +534,20 @@ private fun HomeScreen(
     onSelectSummaryRange: (SummaryRangeType) -> Unit,
     onOpenInsights: () -> Unit,
     onOpenActivity: () -> Unit,
-    onMonthClick: () -> Unit
+    onMonthClick: () -> Unit,
+    onUpdateHomeCardOrder: (List<String>) -> Unit,
+    onToggleHomeCardVisibility: (String) -> Unit
 ) {
+    var isEditingLayout by rememberSaveable { mutableStateOf(false) }
+    val cardOrder = remember(uiState.homeCardOrder) {
+        normalizeHomeCardOrder(uiState.homeCardOrder)
+    }
+    val hiddenCardIds = remember(uiState.homeHiddenCardIds) {
+        normalizeHomeCardIds(uiState.homeHiddenCardIds)
+    }
+    val displayedCardOrder = remember(cardOrder, hiddenCardIds, isEditingLayout) {
+        if (isEditingLayout) cardOrder else cardOrder.filterNot { it in hiddenCardIds }
+    }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -491,45 +558,199 @@ private fun HomeScreen(
                 title = "SpendWise",
                 subtitle = "Smart money tracking",
                 monthLabel = formatMonth(uiState.selectedYear, uiState.selectedMonth),
-                onMonthClick = onMonthClick
+                onMonthClick = onMonthClick,
+                trailingContent = {
+                    IconButton(onClick = { isEditingLayout = !isEditingLayout }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Edit,
+                            contentDescription = if (isEditingLayout) {
+                                "Done editing home layout"
+                            } else {
+                                "Edit home layout"
+                            },
+                            tint = if (isEditingLayout) {
+                                AccentPurple
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                }
             )
         }
-        item { StatusCard(uiState) }
-        item {
-            SummaryRangeCard(
-                selected = uiState.selectedSummaryRange,
-                ranges = uiState.rangeSummaries,
-                onSelect = onSelectSummaryRange
-            )
+        items(displayedCardOrder, key = { it }) { cardId ->
+            EditableHomeCard(
+                cardId = cardId,
+                isEditing = isEditingLayout,
+                isVisible = cardId !in hiddenCardIds,
+                order = cardOrder,
+                onMove = onUpdateHomeCardOrder,
+                onToggleVisibility = { onToggleHomeCardVisibility(cardId) }
+            ) {
+                when (cardId) {
+                    HomeCardId.STATUS -> StatusCard(uiState)
+                    HomeCardId.QUICK_SUMMARY -> SummaryRangeCard(
+                        selected = uiState.selectedSummaryRange,
+                        ranges = uiState.rangeSummaries,
+                        onSelect = onSelectSummaryRange
+                    )
+                    HomeCardId.HERO_SUMMARY -> HeroSummaryCard(uiState)
+                    HomeCardId.SAVINGS_SCORE -> SavingsScoreCard(uiState.savingsScore, uiState.incomeTrend)
+                    HomeCardId.BUDGETS -> BudgetProgressCard(uiState.budgetProgress)
+                    HomeCardId.ANOMALY_ALERTS -> AnomalyAlertsCard(uiState.anomalyAlerts)
+                    HomeCardId.CASHFLOW -> CashflowCard(uiState.cashflowDays)
+                    HomeCardId.INSIGHTS_PREVIEW -> InsightsPreviewCard(
+                        totalSpent = uiState.totalSpent,
+                        topCategories = uiState.topCategories,
+                        paymentModes = uiState.paymentModes,
+                        onViewAll = onOpenInsights
+                    )
+                    HomeCardId.RECENT_TRANSACTIONS -> RecentTransactionsHomeCard(
+                        transactions = uiState.transactions.take(5),
+                        duplicateTransactionIds = uiState.duplicateTransactionIds,
+                        onOpenActivity = onOpenActivity,
+                        onDeleteTransaction = onDeleteTransaction,
+                        onEditTransaction = onEditTransaction,
+                        onOpenTransaction = onOpenTransaction,
+                        onRemoveDuplicateRequest = onRemoveDuplicateRequest
+                    )
+                }
+            }
         }
-        item { HeroSummaryCard(uiState) }
-        item { SavingsScoreCard(uiState.savingsScore, uiState.incomeTrend) }
-        item { BudgetProgressCard(uiState.budgetProgress) }
-        item { AnomalyAlertsCard(uiState.anomalyAlerts) }
-        item { CashflowCard(uiState.cashflowDays) }
-        item {
-            InsightsPreviewCard(
-                totalSpent = uiState.totalSpent,
-                topCategories = uiState.topCategories,
-                paymentModes = uiState.paymentModes,
-                onViewAll = onOpenInsights
-            )
+    }
+}
+
+private fun normalizeHomeCardOrder(order: List<String>): List<String> {
+    return order
+        .filter { it in DefaultHomeCardOrder }
+        .distinct() + DefaultHomeCardOrder.filterNot { it in order }
+}
+
+private fun normalizeHomeCardIds(ids: Set<String>): Set<String> {
+    return ids
+        .filter { it in DefaultHomeCardOrder }
+        .toSet()
+}
+
+private fun moveHomeCard(order: List<String>, cardId: String, direction: Int): List<String> {
+    val currentIndex = order.indexOf(cardId)
+    if (currentIndex == -1) return order
+    val targetIndex = (currentIndex + direction).coerceIn(order.indices)
+    if (targetIndex == currentIndex) return order
+    return order.toMutableList().apply {
+        val item = removeAt(currentIndex)
+        add(targetIndex, item)
+    }
+}
+
+@Composable
+private fun EditableHomeCard(
+    cardId: String,
+    isEditing: Boolean,
+    isVisible: Boolean,
+    order: List<String>,
+    onMove: (List<String>) -> Unit,
+    onToggleVisibility: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    if (!isEditing) {
+        if (isVisible) {
+            content()
         }
-        item {
-            SectionTitle(
-                title = "Recent Transactions",
-                actionLabel = "See all",
-                onAction = onOpenActivity
+        return
+    }
+
+    val index = order.indexOf(cardId)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = HomeCardLabels[cardId].orEmpty(),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                IconButton(onClick = onToggleVisibility) {
+                    Icon(
+                        imageVector = if (isVisible) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                        contentDescription = if (isVisible) {
+                            "Hide ${HomeCardLabels[cardId].orEmpty()}"
+                        } else {
+                            "Show ${HomeCardLabels[cardId].orEmpty()}"
+                        },
+                        tint = if (isVisible) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            AccentPink
+                        }
+                    )
+                }
+                TextButton(
+                    onClick = { onMove(moveHomeCard(order, cardId, -1)) },
+                    enabled = index > 0
+                ) { Text("Up") }
+                TextButton(
+                    onClick = { onMove(moveHomeCard(order, cardId, 1)) },
+                    enabled = index >= 0 && index < order.lastIndex
+                ) { Text("Down") }
+            }
         }
-        items(uiState.transactions.take(5), key = { it.id }) { transaction ->
+        if (isVisible) {
+            content()
+        } else {
+            HiddenHomeCardPlaceholder(cardId)
+        }
+    }
+}
+
+@Composable
+private fun HiddenHomeCardPlaceholder(cardId: String) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "${HomeCardLabels[cardId].orEmpty()} is hidden on Home",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(16.dp)
+        )
+    }
+}
+
+@Composable
+private fun RecentTransactionsHomeCard(
+    transactions: List<TransactionEntity>,
+    duplicateTransactionIds: Set<Long>,
+    onOpenActivity: () -> Unit,
+    onDeleteTransaction: (TransactionEntity) -> Unit,
+    onEditTransaction: (TransactionEntity) -> Unit,
+    onOpenTransaction: (TransactionEntity) -> Unit,
+    onRemoveDuplicateRequest: (TransactionEntity) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(
+            title = "Recent Transactions",
+            actionLabel = "See all",
+            onAction = onOpenActivity
+        )
+        transactions.forEach { transaction ->
             TransactionListItem(
                 transaction = transaction,
                 onDeleteRequest = { onDeleteTransaction(transaction) },
                 onEditRequest = { onEditTransaction(transaction) },
                 onOpenRequest = { onOpenTransaction(transaction) },
                 onRemoveDuplicateRequest = { onRemoveDuplicateRequest(transaction) },
-                isLikelyDuplicate = transaction.id in uiState.duplicateTransactionIds
+                isLikelyDuplicate = transaction.id in duplicateTransactionIds
             )
         }
     }
@@ -1134,7 +1355,8 @@ internal fun ScreenHeader(
     title: String,
     subtitle: String,
     monthLabel: String? = null,
-    onMonthClick: (() -> Unit)? = null
+    onMonthClick: (() -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1145,13 +1367,23 @@ internal fun ScreenHeader(
             Text(text = title, fontWeight = FontWeight.Bold)
             Text(text = subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (monthLabel != null && onMonthClick != null) {
-            AssistChip(
-                onClick = onMonthClick,
-                label = { Text(monthLabel) },
-                trailingIcon = { Icon(Icons.Rounded.ArrowDropDown, contentDescription = null) },
-                colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            )
+        if (trailingContent != null || (monthLabel != null && onMonthClick != null)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                trailingContent?.invoke()
+                if (monthLabel != null && onMonthClick != null) {
+                    AssistChip(
+                        onClick = onMonthClick,
+                        label = { Text(monthLabel) },
+                        trailingIcon = { Icon(Icons.Rounded.ArrowDropDown, contentDescription = null) },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    )
+                }
+            }
         }
     }
 }
@@ -1526,46 +1758,152 @@ private fun InsightsPreviewCard(
     paymentModes: List<PaymentModeTotal>,
     onViewAll: () -> Unit
 ) {
+    val chartValues = topCategories.ifEmpty { listOf(CategoryTotal("Other", 1.0)) }
+    val previewCategories = topCategories.ifEmpty { listOf(CategoryTotal("Other", 0.0)) }
+    val chartColors = donutColors(chartValues.size)
+    val topCategoryName = topCategories.firstOrNull()?.category ?: "No category yet"
+    val topPaymentMode = paymentModes.firstOrNull()
+
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             SectionTitle(title = "Insights", actionLabel = "View all", onAction = onViewAll)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
+                    .padding(16.dp)
             ) {
-                Box(modifier = Modifier.size(124.dp), contentAlignment = Alignment.Center) {
-                    DonutChart(
-                        values = topCategories.ifEmpty { listOf(CategoryTotal("Other", 1.0)) },
-                        colors = donutColors(topCategories.size)
-                    )
-                }
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    topCategories.ifEmpty { listOf(CategoryTotal("Other", 0.0)) }.take(3).forEachIndexed { index, categoryTotal ->
-                        LegendRow(
-                            color = donutColors(topCategories.size)[index % donutColors(topCategories.size).size],
-                            label = categoryTotal.category,
-                            percent = if (totalSpent <= 0.0) 0 else ((categoryTotal.totalAmount / totalSpent) * 100).toInt()
+                    Box(modifier = Modifier.size(104.dp), contentAlignment = Alignment.Center) {
+                        DonutChart(
+                            values = chartValues,
+                            colors = chartColors
                         )
                     }
-                    if (paymentModes.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text(
-                            text = "Top payment mode: ${paymentModes.first().mode}",
-                            color = AccentPurple,
+                            "This month spent",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            formatRupees(totalSpent),
+                            color = AccentPink,
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            text = "Top category: $topCategoryName",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
             }
+
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "All categories",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold
+                )
+                previewCategories.forEachIndexed { index, categoryTotal ->
+                    InsightPreviewCategoryRow(
+                        categoryTotal = categoryTotal,
+                        totalSpent = totalSpent,
+                        color = chartColors[index % chartColors.size]
+                    )
+                }
+            }
+
+            if (topPaymentMode != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(AccentPurple.copy(alpha = 0.12f))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Top payment mode",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        topPaymentMode.mode,
+                        color = AccentPurple,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun InsightPreviewCategoryRow(
+    categoryTotal: CategoryTotal,
+    totalSpent: Double,
+    color: Color
+) {
+    val percent = if (totalSpent <= 0.0) 0 else ((categoryTotal.totalAmount / totalSpent) * 100).toInt()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(color)
+                )
+                Text(
+                    text = categoryTotal.category,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(
+                "$percent%",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        LinearProgressIndicator(
+            progress = { (percent / 100f).coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(99.dp)),
+            color = color,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant
+        )
     }
 }
 
@@ -2572,10 +2910,14 @@ private fun TransactionDetailDialog(
     transaction: TransactionEntity,
     initialMode: TransactionDialogMode,
     availableCategories: List<String>,
+    isFindingSimilarTransactions: Boolean,
+    similarTransactions: List<TransactionEntity>,
     onDismiss: () -> Unit,
-    onSave: (TransactionEntity) -> Unit
+    onSave: (TransactionEntity) -> Unit,
+    onFindSimilar: (TransactionEntity) -> Unit,
+    onClearSimilar: () -> Unit,
+    onApplyToSimilar: (TransactionEntity, Set<Long>) -> Unit
 ) {
-    var editMode by remember(transaction.id, initialMode) { mutableStateOf(initialMode == TransactionDialogMode.EDIT) }
     var amount by rememberSaveable(transaction.id) { mutableStateOf(transaction.amount.toString()) }
     var merchant by rememberSaveable(transaction.id) { mutableStateOf(transaction.merchant) }
     var bank by rememberSaveable(transaction.id) { mutableStateOf(transaction.bank) }
@@ -2585,92 +2927,826 @@ private fun TransactionDetailDialog(
     var selectedTypeIndex by rememberSaveable(transaction.id) {
         mutableIntStateOf(if (transaction.type == TransactionType.DEBIT) 0 else 1)
     }
+    var showAmountEditor by rememberSaveable(transaction.id) {
+        mutableStateOf(initialMode == TransactionDialogMode.EDIT)
+    }
+    var showMerchantEditor by rememberSaveable(transaction.id) { mutableStateOf(false) }
+    var showNoteEditor by rememberSaveable(transaction.id) { mutableStateOf(false) }
+    var showCategoryPicker by rememberSaveable(transaction.id) { mutableStateOf(false) }
+    var showSimilarSheet by rememberSaveable(transaction.id) { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    val selectedType = if (selectedTypeIndex == 0) TransactionType.DEBIT else TransactionType.CREDIT
+    val editedTransaction = transaction.copy(
+        amount = amount.toDoubleOrNull() ?: transaction.amount,
+        merchant = merchant.ifBlank { transaction.merchant },
+        bank = bank.ifBlank { transaction.bank },
+        category = category.ifBlank { transaction.category },
+        note = note,
+        tags = tags,
+        type = selectedType,
+        paymentMode = paymentModeFor(
+            merchant = merchant.ifBlank { transaction.merchant },
+            rawSms = transaction.rawSms
+        )
+    )
+    val isDirty = editedTransaction.amount != transaction.amount ||
+        editedTransaction.merchant != transaction.merchant ||
+        editedTransaction.bank != transaction.bank ||
+        editedTransaction.category != transaction.category ||
+        editedTransaction.note != transaction.note ||
+        editedTransaction.tags != transaction.tags ||
+        editedTransaction.type != transaction.type
+    val amountColor = if (selectedType == TransactionType.CREDIT) AccentGreen else AccentPink
+    val amountPrefix = if (selectedType == TransactionType.CREDIT) "+" else "-"
+    val colorScheme = MaterialTheme.colorScheme
+    val detailBg = colorScheme.background
+    val detailCard = colorScheme.surface
+    val detailVariant = colorScheme.surfaceVariant
+    val detailStroke = colorScheme.outline.copy(alpha = 0.45f)
+    val detailOnSurface = colorScheme.onSurface
+    val detailMuted = colorScheme.onSurfaceVariant
+
+    if (showAmountEditor) {
+        TransactionTextEditorDialog(
+            title = "Edit amount",
+            label = "Amount",
+            initialValue = amount,
+            keyboardType = KeyboardType.Number,
+            isValid = { it.toDoubleOrNull()?.let { value -> value > 0.0 } == true },
+            onDismiss = { showAmountEditor = false },
+            onSave = {
+                amount = it.toDoubleOrNull()?.toString() ?: amount
+                showAmountEditor = false
+            }
+        )
+    }
+    if (showMerchantEditor) {
+        TransactionTextEditorDialog(
+            title = "Edit merchant",
+            label = "Merchant",
+            initialValue = merchant,
+            keyboardType = KeyboardType.Text,
+            isValid = { it.isNotBlank() },
+            onDismiss = { showMerchantEditor = false },
+            onSave = {
+                merchant = it.trim()
+                showMerchantEditor = false
+            }
+        )
+    }
+    if (showNoteEditor) {
+        TransactionTextEditorDialog(
+            title = "Edit note",
+            label = "Note",
+            initialValue = note,
+            keyboardType = KeyboardType.Text,
+            isValid = { true },
+            onDismiss = { showNoteEditor = false },
+            onSave = {
+                note = it.trim()
+                showNoteEditor = false
+            }
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(detailBg)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 108.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(detailCard)
+                                .clickable(onClick = onDismiss),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                                contentDescription = "Back",
+                                tint = detailOnSurface
+                            )
+                        }
+                        Text("Transaction Details", color = detailOnSurface, fontWeight = FontWeight.Black)
+                    }
+                }
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = detailCard),
+                        border = BorderStroke(1.dp, detailStroke),
+                        shape = RoundedCornerShape(28.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(22.dp),
+                            verticalArrangement = Arrangement.spacedBy(18.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CategoryImage(
+                                    category = category,
+                                    size = 72,
+                                    background = colorForCategory(category).copy(alpha = 0.18f)
+                                )
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = amountPrefix + formatRupees(editedTransaction.amount),
+                                        color = amountColor,
+                                        fontWeight = FontWeight.Black,
+                                        modifier = Modifier.clickable { showAmountEditor = true }
+                                    )
+                                    Text(
+                                        text = formatDate(transaction.timestamp),
+                                        color = detailMuted,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = detailStroke)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = merchant.ifBlank { "Unknown Merchant" },
+                                    color = detailOnSurface,
+                                    fontWeight = FontWeight.Black,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { showMerchantEditor = true }) {
+                                    Icon(Icons.Rounded.Edit, contentDescription = "Edit merchant", tint = detailMuted)
+                                }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .align(Alignment.CenterHorizontally)
+                                    .clickable { showNoteEditor = true },
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = note.ifBlank { "Add a note..." },
+                                    color = detailMuted
+                                )
+                                Icon(Icons.Rounded.Edit, contentDescription = "Edit note", tint = detailMuted, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+                item {
+                    SegmentedToggle(listOf("Expense", "Income"), selectedTypeIndex) { selectedTypeIndex = it }
+                }
+                item {
+                    DetailActionCard(
+                        iconCategory = category,
+                        title = category,
+                        subtitle = "Category",
+                        actionLabel = "Change",
+                        onClick = { showCategoryPicker = true }
+                    )
+                }
+                item {
+                    DetailActionCard(
+                        iconCategory = "Other",
+                        title = "Find Similar Transactions",
+                        subtitle = "Apply these edits to matching transactions",
+                        actionLabel = ">",
+                        onClick = {
+                            showSimilarSheet = true
+                            onFindSimilar(editedTransaction)
+                        }
+                    )
+                }
+                item {
+                    Text(
+                        text = "ORIGINAL SMS",
+                        color = detailMuted,
+                        fontWeight = FontWeight.Black
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = detailVariant),
+                        border = BorderStroke(1.dp, detailStroke),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(formatDate(transaction.timestamp).uppercase(Locale.ENGLISH), color = AccentPurple, fontWeight = FontWeight.Black)
+                            Text(transaction.rawSms, color = detailOnSurface, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = if (isDirty) AccentPink else detailCard),
+                shape = RoundedCornerShape(28.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp, vertical = 18.dp)
+                    .navigationBarsPadding()
+                    .clickable(enabled = isDirty) { onSave(editedTransaction) }
+            ) {
+                Text(
+                    text = "Save Changes",
+                    color = if (isDirty) Color.White else detailMuted,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 20.dp)
+                )
+            }
+
+            if (showCategoryPicker) {
+                CategoryPickerSheet(
+                    categories = availableCategories,
+                    selectedCategory = category,
+                    onDismiss = { showCategoryPicker = false },
+                    onSelect = {
+                        category = it
+                        showCategoryPicker = false
+                    }
+                )
+            }
+
+            if (showSimilarSheet && isFindingSimilarTransactions) {
+                FindingSimilarOverlay()
+            } else if (showSimilarSheet) {
+                SimilarTransactionsSheet(
+                    editedTransaction = editedTransaction,
+                    similarTransactions = similarTransactions,
+                    onDismiss = {
+                        showSimilarSheet = false
+                        onClearSimilar()
+                    },
+                    onOnlyThisOne = {
+                        onSave(editedTransaction)
+                        showSimilarSheet = false
+                        onClearSimilar()
+                    },
+                    onApplyToSelected = { selectedIds ->
+                        onSave(editedTransaction)
+                        onApplyToSimilar(editedTransaction, selectedIds)
+                        showSimilarSheet = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailActionCard(
+    iconCategory: String,
+    title: String,
+    subtitle: String,
+    actionLabel: String,
+    onClick: () -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Card(
+        colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+        border = BorderStroke(1.dp, colorScheme.outline.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CategoryImage(
+                category = iconCategory,
+                size = 52,
+                background = colorForCategory(iconCategory).copy(alpha = 0.18f)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = colorScheme.onSurface, fontWeight = FontWeight.Black)
+                Text(subtitle, color = colorScheme.onSurfaceVariant)
+            }
+            Card(
+                colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(
+                    actionLabel,
+                    color = colorScheme.onSurface,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryImage(
+    category: String,
+    size: Int,
+    background: Color
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(size.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(background),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                iconForCategory(category),
+                contentDescription = category,
+                tint = colorForCategory(category),
+                modifier = Modifier.size((size * 0.46f).dp)
+            )
+        }
+        if (size >= 64) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(category, color = colorForCategory(category), fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun CategoryPickerSheet(
+    categories: List<String>,
+    selectedCategory: String,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.68f)),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss)
+        )
+        Card(
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+            border = BorderStroke(1.dp, colorScheme.outline.copy(alpha = 0.45f)),
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.78f)
+        ) {
+            LazyColumn(
+                contentPadding = PaddingValues(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                item {
+                    Text("Change category", color = colorScheme.onSurface, fontWeight = FontWeight.Black)
+                    Text("Pick from SpendWise categories", color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                }
+                items(categories.chunked(3)) { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        row.forEach { category ->
+                            CategoryChoiceTile(
+                                modifier = Modifier.weight(1f),
+                                category = category,
+                                selected = category == selectedCategory,
+                                onSelect = { onSelect(category) }
+                            )
+                        }
+                        repeat(3 - row.size) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryChoiceTile(
+    modifier: Modifier,
+    category: String,
+    selected: Boolean,
+    onSelect: () -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) AccentPurple.copy(alpha = 0.18f) else colorScheme.surfaceVariant
+        ),
+        border = BorderStroke(1.dp, if (selected) AccentPurple else colorScheme.outline.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier
+            .height(116.dp)
+            .clickable(onClick = onSelect)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                iconForCategory(category),
+                contentDescription = category,
+                tint = colorForCategory(category),
+                modifier = Modifier.size(34.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                category,
+                color = colorScheme.onSurface,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun TransactionTextEditorDialog(
+    title: String,
+    label: String,
+    initialValue: String,
+    keyboardType: KeyboardType,
+    isValid: (String) -> Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var value by rememberSaveable(initialValue) { mutableStateOf(initialValue) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = value,
+                onValueChange = { value = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = keyboardType != KeyboardType.Text,
+                label = { Text(label) },
+                keyboardOptions = KeyboardOptions(keyboardType = keyboardType)
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = isValid(value),
+                onClick = { onSave(value) }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun FindingSimilarOverlay() {
+    val colorScheme = MaterialTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.72f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+            shape = RoundedCornerShape(28.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp)
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                CategoryImage(
+                    category = "Other",
+                    size = 76,
+                    background = AccentPink.copy(alpha = 0.18f)
+                )
+                Text("Finding similar transactions", color = colorScheme.onSurface, fontWeight = FontWeight.Black)
+                Text(
+                    "Checking matching merchants, amounts, and transaction type.",
+                    color = colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.SemiBold
+                )
+                CircularProgressIndicator(color = AccentPink)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SimilarTransactionsSheet(
+    editedTransaction: TransactionEntity,
+    similarTransactions: List<TransactionEntity>,
+    onDismiss: () -> Unit,
+    onOnlyThisOne: () -> Unit,
+    onApplyToSelected: (Set<Long>) -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val rangeOptions = listOf("Last 3 months", "All", "Custom")
+    var selectedRangeIndex by rememberSaveable(similarTransactions.size) { mutableIntStateOf(1) }
+    var customMonth by rememberSaveable(similarTransactions.size) { mutableStateOf(YearMonth.now()) }
+    var showCustomMonthPicker by rememberSaveable { mutableStateOf(false) }
+    var selectedIds by remember(similarTransactions) {
+        mutableStateOf(similarTransactions.map { it.id }.toSet())
+    }
+    var query by rememberSaveable(similarTransactions.size) { mutableStateOf("") }
+    val filteredTransactions = remember(similarTransactions, query, selectedRangeIndex, customMonth) {
+        filterSimilarTransactions(
+            transactions = similarTransactions,
+            query = query,
+            rangeIndex = selectedRangeIndex,
+            customMonth = customMonth
+        )
+    }
+
+    LaunchedEffect(selectedRangeIndex, customMonth, similarTransactions) {
+        selectedIds = filteredTransactions.map { it.id }.toSet()
+    }
+
+    if (showCustomMonthPicker) {
+        MonthPickerDialog(
+            initialYear = customMonth.year,
+            selectedMonth = customMonth.monthValue,
+            onDismiss = { showCustomMonthPicker = false },
+            onMonthSelected = { year, month ->
+                customMonth = YearMonth.of(year, month)
+                selectedRangeIndex = 2
+                showCustomMonthPicker = false
+            }
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.72f)),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss)
+        )
+        Card(
+            colors = CardDefaults.cardColors(containerColor = colorScheme.background),
+            border = BorderStroke(1.dp, colorScheme.outline.copy(alpha = 0.45f)),
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
                     .padding(18.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Transaction detail", fontWeight = FontWeight.Bold)
-                    TextButton(onClick = { editMode = !editMode }) {
-                        Icon(Icons.Rounded.Edit, contentDescription = null)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (editMode) "Preview" else "Edit")
+                    Column {
+                        Text(
+                            text = if (editedTransaction.type == TransactionType.CREDIT) {
+                                "Apply to Similar Income"
+                            } else {
+                                "Apply to Similar Expenses"
+                            },
+                            color = colorScheme.onSurface,
+                            fontWeight = FontWeight.Black
+                        )
+                        Text(
+                            "${filteredTransactions.size} shown (${similarTransactions.size} total) • ${selectedIds.size} selected",
+                            color = colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(colorScheme.surfaceVariant)
+                            .clickable(onClick = onDismiss),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Close", tint = colorScheme.onSurface)
                     }
                 }
-                if (editMode) {
-                    SegmentedToggle(listOf("Expense", "Income"), selectedTypeIndex) { selectedTypeIndex = it }
-                    OutlinedTextField(amount, { amount = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Amount") }, singleLine = true)
-                    OutlinedTextField(merchant, { merchant = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Merchant") }, singleLine = true)
-                    OutlinedTextField(bank, { bank = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Bank") }, singleLine = true)
-                    OutlinedTextField(category, { category = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Category") }, singleLine = true)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(availableCategories) { item ->
-                            FilterChip(
-                                selected = category == item,
-                                onClick = { category = item },
-                                label = { Text(item) }
+                SegmentedToggle(
+                    options = rangeOptions,
+                    selectedIndex = selectedRangeIndex,
+                    onSelected = { index ->
+                        selectedRangeIndex = index
+                        if (index == 2) {
+                            showCustomMonthPicker = true
+                        }
+                    }
+                )
+                if (selectedRangeIndex == 2) {
+                    Text(
+                        "Custom month: ${customMonth.format(DateTimeFormatter.ofPattern("MMM yyyy"))}",
+                        color = colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SimilarSheetButton(
+                        label = "Select all",
+                        modifier = Modifier.weight(1f),
+                        onClick = { selectedIds = filteredTransactions.map { it.id }.toSet() }
+                    )
+                    SimilarSheetButton(
+                        label = "Clear all",
+                        modifier = Modifier.weight(1f),
+                        onClick = { selectedIds = emptySet() }
+                    )
+                }
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+                    shape = RoundedCornerShape(22.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        singleLine = true,
+                        label = { Text("Search any transaction") },
+                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) }
+                    )
+                }
+                if (similarTransactions.isEmpty()) {
+                    EmptyStateCard("No similar transactions were found for this merchant and amount.")
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(filteredTransactions, key = { it.id }) { transaction ->
+                            SimilarTransactionRow(
+                                transaction = transaction,
+                                selected = transaction.id in selectedIds,
+                                onToggle = {
+                                    selectedIds = if (transaction.id in selectedIds) {
+                                        selectedIds - transaction.id
+                                    } else {
+                                        selectedIds + transaction.id
+                                    }
+                                }
                             )
                         }
                     }
-                    OutlinedTextField(note, { note = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Note / receipt reference") })
-                    OutlinedTextField(tags, { tags = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Tags (comma separated)") })
-                } else {
-                    DetailLabelValue("Merchant", transaction.merchant)
-                    DetailLabelValue("Amount", formatRupees(transaction.amount))
-                    DetailLabelValue("Type", transaction.type.name)
-                    DetailLabelValue("Category", transaction.category)
-                    DetailLabelValue("Payment mode", transaction.paymentMode)
-                    DetailLabelValue("Bank", transaction.bank)
-                    DetailLabelValue("Source sender", transaction.sourceSender.ifBlank { "Unavailable" })
-                    DetailLabelValue("Verification", transaction.verificationSource)
-                    if (transaction.aiReason.isNotBlank()) {
-                        DetailLabelValue("AI reason", transaction.aiReason)
-                    }
-                    if (transaction.note.isNotBlank()) {
-                        DetailLabelValue("Note", transaction.note)
-                    }
-                    if (transaction.tags.isNotBlank()) {
-                        DetailLabelValue("Tags", transaction.tags)
-                    }
-                    DetailLabelValue("Raw SMS", transaction.rawSms)
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SimilarSheetButton(
+                        label = "Only this one",
+                        modifier = Modifier.weight(1f),
+                        onClick = onOnlyThisOne
+                    )
+                    SimilarSheetButton(
+                        label = "Apply to selected (${selectedIds.size})",
+                        modifier = Modifier.weight(1f),
+                        enabled = selectedIds.isNotEmpty(),
+                        accent = AccentPink,
+                        onClick = { onApplyToSelected(selectedIds) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SimilarSheetButton(
+    label: String,
+    modifier: Modifier,
+    enabled: Boolean = true,
+    accent: Color = AccentPurple,
+    onClick: () -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (enabled) accent.copy(alpha = 0.18f) else colorScheme.surfaceVariant
+        ),
+        border = BorderStroke(1.dp, if (enabled) accent.copy(alpha = 0.58f) else colorScheme.outline.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(22.dp),
+        modifier = modifier.clickable(enabled = enabled, onClick = onClick)
+    ) {
+        Text(
+            label,
+            color = if (enabled) colorScheme.onSurface else colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp)
+        )
+    }
+}
+
+@Composable
+private fun SimilarTransactionRow(
+    transaction: TransactionEntity,
+    selected: Boolean,
+    onToggle: () -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) AccentPink.copy(alpha = 0.12f) else colorScheme.surface
+        ),
+        border = BorderStroke(1.dp, if (selected) AccentPink else colorScheme.outline.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onToggle() }
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "${transaction.merchant} • ${formatRupees(transaction.amount)} • ${formatDate(transaction.timestamp)}",
+                    color = colorScheme.onSurface,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
-                    TextButton(onClick = onDismiss) { Text("Close") }
-                    if (editMode) {
-                        TextButton(
-                            onClick = {
-                                val updatedAmount = amount.toDoubleOrNull() ?: transaction.amount
-                                onSave(
-                                    transaction.copy(
-                                        amount = updatedAmount,
-                                        merchant = merchant.ifBlank { transaction.merchant },
-                                        bank = bank.ifBlank { transaction.bank },
-                                        category = category.ifBlank { transaction.category },
-                                        note = note,
-                                        tags = tags,
-                                        type = if (selectedTypeIndex == 0) TransactionType.DEBIT else TransactionType.CREDIT,
-                                        paymentMode = paymentModeFor(
-                                            merchant = merchant.ifBlank { transaction.merchant },
-                                            rawSms = transaction.rawSms
-                                        )
-                                    )
-                                )
-                            }
-                        ) { Text("Save") }
-                    }
+                    Text(
+                        transaction.rawSms,
+                        color = colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(12.dp)
+                    )
                 }
             }
         }
@@ -3226,6 +4302,42 @@ private fun paymentModeFor(merchant: String, rawSms: String): String {
         haystack.contains("atm") || haystack.contains("withdrawn") -> "ATM"
         haystack.contains("neft") || haystack.contains("imps") || haystack.contains("rtgs") -> "Bank Transfer"
         else -> "Other"
+    }
+}
+
+private fun filterSimilarTransactions(
+    transactions: List<TransactionEntity>,
+    query: String,
+    rangeIndex: Int,
+    customMonth: YearMonth
+): List<TransactionEntity> {
+    val zone = ZoneId.systemDefault()
+    val lastThreeMonthsStart = LocalDateTime.now()
+        .minusMonths(3)
+        .atZone(zone)
+        .toInstant()
+        .toEpochMilli()
+    val term = query.trim().lowercase(Locale.ENGLISH)
+
+    return transactions.filter { transaction ->
+        val matchesRange = when (rangeIndex) {
+            0 -> transaction.timestamp >= lastThreeMonthsStart
+            2 -> YearMonth.from(
+                Instant.ofEpochMilli(transaction.timestamp)
+                    .atZone(zone)
+                    .toLocalDate()
+            ) == customMonth
+            else -> true
+        }
+        val matchesQuery = term.isBlank() || listOf(
+            transaction.merchant,
+            transaction.bank,
+            transaction.category,
+            transaction.rawSms,
+            formatRupees(transaction.amount)
+        ).any { it.lowercase(Locale.ENGLISH).contains(term) }
+
+        matchesRange && matchesQuery
     }
 }
 

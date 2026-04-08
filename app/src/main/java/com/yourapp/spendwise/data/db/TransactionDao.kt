@@ -29,6 +29,9 @@ interface TransactionDao {
     @Update
     suspend fun update(transaction: TransactionEntity): Int
 
+    @Update
+    suspend fun updateAll(transactions: List<TransactionEntity>): Int
+
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteById(id: Long): Int
 
@@ -63,6 +66,14 @@ interface TransactionDao {
         """
     )
     suspend fun getTransactionsList(startMs: Long, endMs: Long): List<TransactionEntity>
+
+    @Query(
+        """
+        SELECT * FROM transactions
+        ORDER BY timestamp DESC
+        """
+    )
+    suspend fun getAllTransactionsList(): List<TransactionEntity>
 
     @Query(
         """

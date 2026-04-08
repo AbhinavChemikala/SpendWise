@@ -2,6 +2,11 @@ package com.yourapp.spendwise.widget
 
 import android.content.Context
 import android.content.Intent
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.CoroutineWorker
+import androidx.work.WorkerParameters
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
@@ -12,10 +17,14 @@ import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalSize
+import androidx.glance.action.ActionParameters
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.SizeMode
+import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.lazy.LazyColumn
@@ -45,9 +54,12 @@ import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
 import java.text.NumberFormat
+import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 private val WBg       = Color(0xFF12111A)
@@ -62,6 +74,19 @@ private val WIncome   = Color(0xFF81C784)
 private fun rupee(amount: Double): String =
     NumberFormat.getCurrencyInstance(Locale("en", "IN")).format(amount)
 
+private fun transactionDateLabel(timestamp: Long): String {
+    val zone = ZoneId.systemDefault()
+    val transactionDate = java.time.Instant.ofEpochMilli(timestamp)
+        .atZone(zone)
+        .toLocalDate()
+    val today = LocalDate.now(zone)
+    return when (transactionDate) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> transactionDate.format(DateTimeFormatter.ofPattern("dd MMM"))
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SpendWiseWidget : GlanceAppWidget() {
@@ -69,11 +94,13 @@ class SpendWiseWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        WidgetUpdater.scheduleNextDateRefresh(context.applicationContext)
         val dao = AppDatabase.getInstance(context.applicationContext).transactionDao()
 
-        val now      = LocalDate.now()
-        val startMs  = now.withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        val endMs    = now.plusMonths(1).withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() - 1
+        val zone     = ZoneId.systemDefault()
+        val now      = LocalDate.now(zone)
+        val startMs  = now.withDayOfMonth(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val endMs    = now.plusMonths(1).withDayOfMonth(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
 
         val summary      = dao.getMonthlySummary(startMs, endMs)
         val transactions = dao.getTransactionsList(startMs, endMs)   // all of this month
@@ -109,7 +136,11 @@ class SpendWiseWidget : GlanceAppWidget() {
             Spacer(GlanceModifier.height(4.dp))
             Text(rupee(totalSpent), style = ts(WPrimary, 17.sp, bold = true))
             Spacer(GlanceModifier.height(14.dp))
-            AddBtn(ctx, 36.dp)
+            Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                RefreshBtn(32.dp)
+                Spacer(GlanceModifier.width(8.dp))
+                AddBtn(ctx, 36.dp)
+            }
         }
     }
 
@@ -140,6 +171,8 @@ class SpendWiseWidget : GlanceAppWidget() {
                     Text(rupee(totalSpent), style = ts(WPrimary, 19.sp, bold = true))
                     Text("In: ${rupee(totalReceived)}", style = ts(WIncome, 11.sp))
                 }
+                RefreshBtn(34.dp)
+                Spacer(GlanceModifier.width(8.dp))
                 AddBtn(ctx, 38.dp)
             }
 
@@ -149,7 +182,7 @@ class SpendWiseWidget : GlanceAppWidget() {
 
             // Scrollable transaction list via LazyColumn
             LazyColumn(modifier = GlanceModifier.fillMaxWidth().fillMaxHeight()) {
-                items(transactions) { tx ->
+                items(transactions, itemId = { it.id }) { tx ->
                     TxRow(tx)
                 }
             }
@@ -180,6 +213,8 @@ class SpendWiseWidget : GlanceAppWidget() {
                     Text("SpendWise", style = ts(WAccent, 13.sp, bold = true))
                     Text("This Month", style = ts(WSecond, 11.sp))
                 }
+                RefreshBtn(36.dp)
+                Spacer(GlanceModifier.width(8.dp))
                 AddBtn(ctx, 40.dp)
             }
 
@@ -201,7 +236,7 @@ class SpendWiseWidget : GlanceAppWidget() {
 
             // Scrollable transaction list via LazyColumn
             LazyColumn(modifier = GlanceModifier.fillMaxWidth().fillMaxHeight()) {
-                items(transactions) { tx ->
+                items(transactions, itemId = { it.id }) { tx ->
                     TxRow(tx)
                 }
             }
@@ -258,16 +293,41 @@ class SpendWiseWidget : GlanceAppWidget() {
                         .cornerRadius(2.dp)
                 ) {}
                 Spacer(GlanceModifier.width(10.dp))
-                Text(
-                    tx.merchant,
-                    style = ts(WPrimary, 13.sp),
-                    modifier = GlanceModifier.defaultWeight()
-                )
+                Column(modifier = GlanceModifier.defaultWeight()) {
+                    Text(
+                        tx.merchant,
+                        style = ts(WPrimary, 13.sp)
+                    )
+                    Spacer(GlanceModifier.height(2.dp))
+                    Text(
+                        transactionDateLabel(tx.timestamp),
+                        style = ts(WSecond, 10.sp)
+                    )
+                }
+                Spacer(GlanceModifier.width(8.dp))
                 Text(
                     "$prefix${rupee(tx.amount)}",
                     style = ts(amtColor, 13.sp, bold = true)
                 )
             }
+        }
+    }
+
+    @Composable
+    private fun RefreshBtn(size: Dp) {
+        Box(
+            modifier = GlanceModifier
+                .size(size)
+                .background(WCard)
+                .cornerRadius(size / 2)
+                .clickable(actionRunCallback<RefreshWidgetAction>()),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                provider = ImageProvider(R.drawable.ic_widget_refresh),
+                contentDescription = "Refresh",
+                modifier = GlanceModifier.size(size * 0.52f)
+            )
         }
     }
 
@@ -319,8 +379,89 @@ class SpendWiseLargeWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = SpendWiseWidget()
 }
 
+class RefreshWidgetAction : ActionCallback {
+    override suspend fun onAction(
+        context: Context,
+        glanceId: GlanceId,
+        parameters: ActionParameters
+    ) {
+        WidgetUpdater.updateAll(context)
+    }
+}
+
 object WidgetUpdater {
     suspend fun updateAll(context: Context) {
-        SpendWiseWidget().updateAll(context)
+        val appContext = context.applicationContext
+        refreshNow(appContext)
+        scheduleImmediateRefresh(appContext)
+        scheduleNextDateRefresh(appContext)
+    }
+
+    suspend fun refreshNow(context: Context) {
+        val appContext = context.applicationContext
+        val widget = SpendWiseWidget()
+        val manager = GlanceAppWidgetManager(appContext)
+        val glanceIds = manager.getGlanceIds(SpendWiseWidget::class.java)
+
+        if (glanceIds.isEmpty()) {
+            widget.updateAll(appContext)
+        } else {
+            glanceIds.forEach { glanceId ->
+                widget.update(appContext, glanceId)
+            }
+        }
+    }
+
+    private fun scheduleImmediateRefresh(context: Context) {
+        val appContext = context.applicationContext
+        val request = OneTimeWorkRequestBuilder<WidgetRefreshWorker>().build()
+        WorkManager.getInstance(appContext).enqueueUniqueWork(
+            "spendwise_widget_refresh",
+            ExistingWorkPolicy.REPLACE,
+            request
+        )
+    }
+
+    fun scheduleNextDateRefresh(context: Context) {
+        val appContext = context.applicationContext
+        val zone = ZoneId.systemDefault()
+        val now = java.time.ZonedDateTime.now(zone)
+        val nextMidnight = now.toLocalDate()
+            .plusDays(1)
+            .atStartOfDay(zone)
+        val delayMillis = Duration.between(now, nextMidnight)
+            .toMillis()
+            .coerceAtLeast(60_000L)
+
+        val request = OneTimeWorkRequestBuilder<WidgetDateRefreshWorker>()
+            .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
+            .build()
+
+        WorkManager.getInstance(appContext).enqueueUniqueWork(
+            "spendwise_widget_date_refresh",
+            ExistingWorkPolicy.REPLACE,
+            request
+        )
+    }
+}
+
+class WidgetDateRefreshWorker(
+    appContext: Context,
+    workerParams: WorkerParameters
+) : CoroutineWorker(appContext, workerParams) {
+    override suspend fun doWork(): Result {
+        WidgetUpdater.refreshNow(applicationContext)
+        WidgetUpdater.scheduleNextDateRefresh(applicationContext)
+        return Result.success()
+    }
+}
+
+class WidgetRefreshWorker(
+    appContext: Context,
+    workerParams: WorkerParameters
+) : CoroutineWorker(appContext, workerParams) {
+    override suspend fun doWork(): Result {
+        WidgetUpdater.refreshNow(applicationContext)
+        return Result.success()
     }
 }

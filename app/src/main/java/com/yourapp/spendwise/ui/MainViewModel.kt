@@ -88,6 +88,8 @@ data class DashboardUiState(
     val dailyReminderEnabled: Boolean = true,
     val dailyReminderHour: Int = 22,
     val dailyReminderMinute: Int = 0,
+    val homeCardOrder: List<String> = emptyList(),
+    val homeHiddenCardIds: Set<String> = emptySet(),
     val debugPhoneNumber: String = "",
     val customCategories: List<CustomCategory> = emptyList(),
     val transactionRules: List<TransactionRule> = emptyList(),
@@ -100,7 +102,10 @@ data class DashboardUiState(
     val debugStatusMessage: String? = null,
     val isImportingSms: Boolean = false,
     val importProgress: Pair<Int, Int> = 0 to 0,
-    val showManualAddDialog: Boolean = false
+    val showManualAddDialog: Boolean = false,
+    val isFindingSimilarTransactions: Boolean = false,
+    val similarTransactionSourceId: Long? = null,
+    val similarTransactions: List<TransactionEntity> = emptyList()
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -116,6 +121,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dailyReminderEnabled = repository.isDailyReminderEnabled(),
             dailyReminderHour = repository.getDailyReminderHour(),
             dailyReminderMinute = repository.getDailyReminderMinute(),
+            homeCardOrder = repository.getHomeCardOrder(),
+            homeHiddenCardIds = repository.getHiddenHomeCardIds(),
             debugPhoneNumber = repository.getDebugPhoneNumber()
         )
     )
@@ -275,6 +282,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateHomeCardOrder(order: List<String>) {
+        repository.setHomeCardOrder(order)
+        _uiState.update {
+            it.copy(
+                homeCardOrder = repository.getHomeCardOrder(),
+                debugStatusMessage = "Home layout updated."
+            )
+        }
+    }
+
+    fun resetHomeCardOrder() {
+        repository.resetHomeCardOrder()
+        _uiState.update {
+            it.copy(
+                homeCardOrder = repository.getHomeCardOrder(),
+                debugStatusMessage = "Home layout reset."
+            )
+        }
+    }
+
+    fun toggleHomeCardVisibility(cardId: String) {
+        val hiddenCardIds = repository.getHiddenHomeCardIds().toMutableSet()
+        if (cardId in hiddenCardIds) {
+            hiddenCardIds.remove(cardId)
+        } else {
+            hiddenCardIds.add(cardId)
+        }
+        repository.setHiddenHomeCardIds(hiddenCardIds)
+        _uiState.update {
+            it.copy(
+                homeHiddenCardIds = repository.getHiddenHomeCardIds(),
+                debugStatusMessage = "Home card visibility updated."
+            )
+        }
+    }
+
     fun updateDebugPhoneNumber(phoneNumber: String) {
         repository.setDebugPhoneNumber(phoneNumber)
         _uiState.update { it.copy(debugPhoneNumber = phoneNumber) }
@@ -290,6 +333,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         "Unable to update ${transaction.merchant}."
                     }
+                )
+            }
+            loadCurrentMonth()
+        }
+    }
+
+    fun findSimilarTransactions(transaction: TransactionEntity) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isFindingSimilarTransactions = true,
+                    similarTransactionSourceId = transaction.id,
+                    similarTransactions = emptyList()
+                )
+            }
+            val similar = repository.findSimilarTransactions(transaction)
+            _uiState.update {
+                it.copy(
+                    isFindingSimilarTransactions = false,
+                    similarTransactionSourceId = transaction.id,
+                    similarTransactions = similar
+                )
+            }
+        }
+    }
+
+    fun clearSimilarTransactions() {
+        _uiState.update {
+            it.copy(
+                isFindingSimilarTransactions = false,
+                similarTransactionSourceId = null,
+                similarTransactions = emptyList()
+            )
+        }
+    }
+
+    fun applyTransactionChangesToSimilar(
+        editedTransaction: TransactionEntity,
+        targetTransactionIds: Set<Long>
+    ) {
+        viewModelScope.launch {
+            val updatedCount = repository.applyTransactionChangesToSimilar(
+                editedTransaction = editedTransaction,
+                targetTransactionIds = targetTransactionIds
+            )
+            _uiState.update {
+                it.copy(
+                    debugStatusMessage = if (updatedCount > 0) {
+                        "Updated $updatedCount similar transactions."
+                    } else {
+                        "No similar transactions were updated."
+                    },
+                    similarTransactionSourceId = null,
+                    similarTransactions = emptyList(),
+                    isFindingSimilarTransactions = false
                 )
             }
             loadCurrentMonth()
@@ -574,7 +672,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 customCategories = repository.getCustomCategories(),
                 transactionRules = repository.getRules(),
-                budgetGoals = repository.getBudgetGoals()
+                budgetGoals = repository.getBudgetGoals(),
+                homeCardOrder = repository.getHomeCardOrder(),
+                homeHiddenCardIds = repository.getHiddenHomeCardIds()
             )
         }
     }

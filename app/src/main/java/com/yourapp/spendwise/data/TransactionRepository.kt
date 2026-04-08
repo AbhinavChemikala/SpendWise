@@ -272,25 +272,75 @@ class TransactionRepository(context: Context) {
     }
 
     suspend fun updateTransaction(transaction: TransactionEntity): Boolean = withContext(Dispatchers.IO) {
-        val normalized = transaction.copy(
-            merchant = MerchantNormalizer.normalize(transaction.merchant, transaction.rawSms),
-            category = if (transaction.category.isBlank()) {
-                TransactionCategoryResolver.resolve(
-                    merchant = transaction.merchant,
-                    rawSms = transaction.rawSms,
-                    type = transaction.type
-                )
-            } else {
-                transaction.category
-            },
-            paymentMode = PaymentModeResolver.resolve(
-                rawSms = transaction.rawSms,
-                merchant = transaction.merchant
-            )
-        )
+        val normalized = normalizeTransaction(transaction)
         val success = transactionDao.update(normalized) > 0
         if (success) WidgetUpdater.updateAll(appContext)
         success
+    }
+
+    suspend fun findSimilarTransactions(transaction: TransactionEntity): List<TransactionEntity> = withContext(Dispatchers.IO) {
+        val targetMerchant = MerchantNormalizer.normalize(transaction.merchant, transaction.rawSms)
+        val targetMerchantKey = targetMerchant.lowercase(java.util.Locale.ENGLISH)
+        val targetAmount = "%.2f".format(java.util.Locale.ENGLISH, transaction.amount)
+        val targetAccount = transaction.accountLabel.ifBlank { transaction.bank }
+            .lowercase(java.util.Locale.ENGLISH)
+
+        transactionDao.getAllTransactionsList()
+            .asSequence()
+            .filter { it.id != transaction.id }
+            .mapNotNull { candidate ->
+                val candidateMerchant = MerchantNormalizer.normalize(candidate.merchant, candidate.rawSms)
+                val candidateMerchantKey = candidateMerchant.lowercase(java.util.Locale.ENGLISH)
+                val candidateAmount = "%.2f".format(java.util.Locale.ENGLISH, candidate.amount)
+                val candidateAccount = candidate.accountLabel.ifBlank { candidate.bank }
+                    .lowercase(java.util.Locale.ENGLISH)
+
+                var score = 0
+                if (targetMerchantKey.isNotBlank() && targetMerchantKey != "unknown merchant" && candidateMerchantKey == targetMerchantKey) {
+                    score += 5
+                }
+                if (candidateAmount == targetAmount) score += 3
+                if (candidate.type == transaction.type) score += 2
+                if (targetAccount.isNotBlank() && candidateAccount == targetAccount) score += 1
+
+                if (score >= 5) candidate to score else null
+            }
+            .sortedWith(
+                compareByDescending<Pair<TransactionEntity, Int>> { it.second }
+                    .thenByDescending { it.first.timestamp }
+            )
+            .map { it.first }
+            .toList()
+    }
+
+    suspend fun applyTransactionChangesToSimilar(
+        editedTransaction: TransactionEntity,
+        targetTransactionIds: Set<Long>
+    ): Int = withContext(Dispatchers.IO) {
+        if (targetTransactionIds.isEmpty()) return@withContext 0
+
+        val normalizedSource = normalizeTransaction(editedTransaction)
+        val candidates = transactionDao.getAllTransactionsList()
+            .filter { it.id in targetTransactionIds && it.id != editedTransaction.id }
+            .map { candidate ->
+                normalizeTransaction(
+                    candidate.copy(
+                        amount = normalizedSource.amount,
+                        type = normalizedSource.type,
+                        merchant = normalizedSource.merchant,
+                        bank = normalizedSource.bank,
+                        category = normalizedSource.category,
+                        note = normalizedSource.note,
+                        tags = normalizedSource.tags,
+                        paymentMode = normalizedSource.paymentMode
+                    )
+                )
+            }
+
+        if (candidates.isEmpty()) return@withContext 0
+        val updatedCount = transactionDao.updateAll(candidates)
+        if (updatedCount > 0) WidgetUpdater.updateAll(appContext)
+        updatedCount
     }
 
     suspend fun deleteTransaction(transactionId: Long): Boolean = withContext(Dispatchers.IO) {
@@ -438,6 +488,22 @@ class TransactionRepository(context: Context) {
         DailyReminderScheduler.scheduleNext(appContext)
     }
 
+    fun getHomeCardOrder(): List<String> = settingsStore.getHomeCardOrder()
+
+    fun setHomeCardOrder(order: List<String>) {
+        settingsStore.setHomeCardOrder(order)
+    }
+
+    fun resetHomeCardOrder() {
+        settingsStore.resetHomeCardOrder()
+    }
+
+    fun getHiddenHomeCardIds(): Set<String> = settingsStore.getHiddenHomeCardIds()
+
+    fun setHiddenHomeCardIds(hiddenCardIds: Set<String>) {
+        settingsStore.setHiddenHomeCardIds(hiddenCardIds)
+    }
+
     fun getDebugPhoneNumber(): String = settingsStore.getDebugPhoneNumber()
 
     fun setDebugPhoneNumber(phoneNumber: String) {
@@ -481,6 +547,25 @@ class TransactionRepository(context: Context) {
     fun observeDebugConsole() = reviewDao.observeDebugConsole()
 
     fun observeImportSourceEvents() = reviewDao.observeSourceEvents("IMPORT")
+
+    private fun normalizeTransaction(transaction: TransactionEntity): TransactionEntity {
+        return transaction.copy(
+            merchant = MerchantNormalizer.normalize(transaction.merchant, transaction.rawSms),
+            category = if (transaction.category.isBlank()) {
+                TransactionCategoryResolver.resolve(
+                    merchant = transaction.merchant,
+                    rawSms = transaction.rawSms,
+                    type = transaction.type
+                )
+            } else {
+                transaction.category
+            },
+            paymentMode = PaymentModeResolver.resolve(
+                rawSms = transaction.rawSms,
+                merchant = transaction.merchant
+            )
+        )
+    }
 
     private fun getMonthRange(year: Int, month: Int): Pair<Long, Long> {
         val zone = ZoneId.systemDefault()
