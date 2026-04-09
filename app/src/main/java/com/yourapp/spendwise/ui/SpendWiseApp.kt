@@ -5,7 +5,10 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.google.gson.Gson
+import com.google.android.gms.auth.api.signin.GoogleSignIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -159,6 +162,7 @@ import com.yourapp.spendwise.data.db.SmsReviewEntity
 import com.yourapp.spendwise.data.db.TransactionCategoryAiEntity
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
+import com.yourapp.spendwise.mail.GmailAxisSyncManager
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDateTime
@@ -292,6 +296,18 @@ fun SpendWiseApp(vm: MainViewModel) {
     var transactionPendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var selectedTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
     var transactionDialogMode by rememberSaveable { mutableStateOf(TransactionDialogMode.VIEW) }
+    val gmailConnectLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data ?: return@rememberLauncherForActivityResult
+        val task = GoogleSignIn.getSignedInAccountFromIntent(data)
+        val account = runCatching { task.getResult(Exception::class.java) }.getOrNull()
+        if (account?.email.isNullOrBlank()) {
+            vm.setDebugStatus("Unable to connect Gmail for Axis email sync.")
+        } else {
+            vm.connectAxisEmailAccount(account?.email.orEmpty())
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -512,6 +528,18 @@ fun SpendWiseApp(vm: MainViewModel) {
                 onToggleAiReview = vm::toggleAiReview,
                 onToggleCloudAi = vm::toggleCloudAi,
                 onUpdateCloudAiApiKey = vm::updateCloudAiApiKey,
+                onConnectAxisEmail = {
+                    val client = GmailAxisSyncManager.buildSignInClient(context)
+                    client.signOut().addOnCompleteListener {
+                        gmailConnectLauncher.launch(client.signInIntent)
+                    }
+                },
+                onDisconnectAxisEmail = {
+                    GmailAxisSyncManager.buildSignInClient(context).signOut()
+                    vm.disconnectAxisEmailAccount()
+                },
+                onToggleAxisEmailAutoSync = vm::toggleAxisEmailAutoSync,
+                onSyncAxisEmails = vm::syncAxisEmailsNow,
                 onRecoverLegacyAiFailures = vm::recoverLegacyAiFailures,
                 onSetThemeMode = vm::setThemeMode,
                 onToggleDailyReminder = vm::toggleDailyReminder,
@@ -1015,6 +1043,10 @@ private fun SettingsScreen(
     onToggleAiReview: (Boolean) -> Unit,
     onToggleCloudAi: (Boolean) -> Unit,
     onUpdateCloudAiApiKey: (String) -> Unit,
+    onConnectAxisEmail: () -> Unit,
+    onDisconnectAxisEmail: () -> Unit,
+    onToggleAxisEmailAutoSync: (Boolean) -> Unit,
+    onSyncAxisEmails: () -> Unit,
     onRecoverLegacyAiFailures: () -> Unit,
     onSetThemeMode: (String) -> Unit,
     onToggleDailyReminder: (Boolean) -> Unit,
@@ -1208,6 +1240,91 @@ private fun SettingsScreen(
                                 Text("Scanning")
                             } else {
                                 Text("Scan once")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Axis Email Sync", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = "Read Axis Bank alert emails from Gmail, skip them when a matching SMS already exists, and send the rest through the same AI pipeline as SMS.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (uiState.axisEmailAccount.isBlank()) {
+                        TextButton(
+                            onClick = onConnectAxisEmail,
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("Connect Gmail")
+                        }
+                    } else {
+                        Text(
+                            text = "Connected: ${uiState.axisEmailAccount}",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = if (uiState.axisEmailLastSyncMs > 0L) {
+                                "Last checked ${formatDate(uiState.axisEmailLastSyncMs)}"
+                            } else {
+                                "No Axis email sync has run yet."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Auto-check Axis emails", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = "SpendWise polls Gmail on-device every few minutes using WorkManager.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = uiState.axisEmailAutoSyncEnabled,
+                                onCheckedChange = onToggleAxisEmailAutoSync
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(
+                                onClick = onSyncAxisEmails,
+                                enabled = !uiState.isAxisEmailSyncing
+                            ) {
+                                if (uiState.isAxisEmailSyncing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Syncing")
+                                } else {
+                                    Text("Sync now")
+                                }
+                            }
+                            TextButton(onClick = onDisconnectAxisEmail) {
+                                Text("Disconnect")
                             }
                         }
                     }

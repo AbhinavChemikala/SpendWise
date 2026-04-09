@@ -41,6 +41,43 @@ class SettingsStore(context: Context) {
         prefs.edit().putString(KEY_CLOUD_AI_API_KEY, key.trim()).apply()
     }
 
+    fun getAxisEmailAccount(): String = prefs.getString(KEY_AXIS_EMAIL_ACCOUNT, "").orEmpty()
+
+    fun setAxisEmailAccount(email: String) {
+        prefs.edit().putString(KEY_AXIS_EMAIL_ACCOUNT, email.trim()).apply()
+    }
+
+    fun clearAxisEmailAccount() {
+        prefs.edit()
+            .remove(KEY_AXIS_EMAIL_ACCOUNT)
+            .remove(KEY_AXIS_EMAIL_LAST_SYNC_MS)
+            .remove(KEY_AXIS_EMAIL_MESSAGE_IDS)
+            .apply()
+    }
+
+    fun isAxisEmailAutoSyncEnabled(): Boolean = prefs.getBoolean(KEY_AXIS_EMAIL_AUTO_SYNC, true)
+
+    fun setAxisEmailAutoSyncEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AXIS_EMAIL_AUTO_SYNC, enabled).apply()
+    }
+
+    fun getAxisEmailLastSyncMs(): Long = prefs.getLong(KEY_AXIS_EMAIL_LAST_SYNC_MS, 0L)
+
+    fun setAxisEmailLastSyncMs(timestampMs: Long) {
+        prefs.edit().putLong(KEY_AXIS_EMAIL_LAST_SYNC_MS, timestampMs.coerceAtLeast(0L)).apply()
+    }
+
+    fun getAxisEmailRecentMessageIds(): List<String> {
+        return readList<String>(KEY_AXIS_EMAIL_MESSAGE_IDS)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+
+    fun setAxisEmailRecentMessageIds(messageIds: List<String>) {
+        writeList(KEY_AXIS_EMAIL_MESSAGE_IDS, messageIds.filter { it.isNotBlank() }.distinct().takeLast(200))
+    }
+
     /** "system", "light", or one of the dark theme mode strings. */
     fun getThemeMode(): String = prefs.getString(KEY_THEME_MODE, "system").orEmpty().ifBlank { "system" }
 
@@ -196,6 +233,10 @@ class SettingsStore(context: Context) {
         private const val KEY_BUDGET_GOALS = "budget_goals"
         private const val KEY_CLOUD_AI_ENABLED = "cloud_ai_enabled"
         private const val KEY_CLOUD_AI_API_KEY = "cloud_ai_api_key"
+        private const val KEY_AXIS_EMAIL_ACCOUNT = "axis_email_account"
+        private const val KEY_AXIS_EMAIL_AUTO_SYNC = "axis_email_auto_sync"
+        private const val KEY_AXIS_EMAIL_LAST_SYNC_MS = "axis_email_last_sync_ms"
+        private const val KEY_AXIS_EMAIL_MESSAGE_IDS = "axis_email_message_ids"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DAILY_REMINDER_ENABLED = "daily_reminder_enabled"
         private const val KEY_DAILY_REMINDER_HOUR = "daily_reminder_hour"

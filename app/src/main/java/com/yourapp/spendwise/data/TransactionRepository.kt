@@ -14,6 +14,8 @@ import com.yourapp.spendwise.data.db.SmsReviewEntity
 import com.yourapp.spendwise.data.db.TransactionCategoryAiEntity
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
+import com.yourapp.spendwise.mail.AxisEmailSyncResult
+import com.yourapp.spendwise.mail.GmailAxisSyncManager
 import com.yourapp.spendwise.sms.SmsIntakeOutcome
 import com.yourapp.spendwise.sms.SmsIntakeManager
 import com.yourapp.spendwise.sms.SmsProcessor
@@ -694,6 +696,34 @@ class TransactionRepository(context: Context) {
 
     fun setCloudAiApiKey(key: String) {
         settingsStore.setCloudAiApiKey(key)
+    }
+
+    fun getAxisEmailAccount(): String = settingsStore.getAxisEmailAccount()
+
+    fun isAxisEmailConnected(): Boolean = getAxisEmailAccount().isNotBlank()
+
+    fun connectAxisEmailAccount(email: String) {
+        GmailAxisSyncManager.onAccountConnected(appContext, email)
+    }
+
+    fun disconnectAxisEmailAccount() {
+        GmailAxisSyncManager.disconnect(appContext)
+    }
+
+    fun isAxisEmailAutoSyncEnabled(): Boolean = settingsStore.isAxisEmailAutoSyncEnabled()
+
+    fun setAxisEmailAutoSyncEnabled(enabled: Boolean) {
+        GmailAxisSyncManager.setAutoSyncEnabled(appContext, enabled)
+    }
+
+    fun getAxisEmailLastSyncMs(): Long = settingsStore.getAxisEmailLastSyncMs()
+
+    fun ensureAxisEmailSyncSchedule() {
+        GmailAxisSyncManager.ensureScheduled(appContext)
+    }
+
+    suspend fun syncAxisEmailsNow(): AxisEmailSyncResult {
+        return GmailAxisSyncManager.syncNow(appContext)
     }
 
     fun getThemeMode(): String = settingsStore.getThemeMode()

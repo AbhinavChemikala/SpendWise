@@ -97,6 +97,7 @@ dependencies {
 
     implementation("com.google.mlkit:genai-common:1.0.0-beta1")
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta1")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("com.google.code.gson:gson:2.10.1")

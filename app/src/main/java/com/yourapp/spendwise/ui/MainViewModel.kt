@@ -85,6 +85,10 @@ data class DashboardUiState(
     val isAiReviewEnabled: Boolean = true,
     val isCloudAiEnabled: Boolean = false,
     val cloudAiApiKey: String = "",
+    val axisEmailAccount: String = "",
+    val axisEmailAutoSyncEnabled: Boolean = true,
+    val axisEmailLastSyncMs: Long = 0L,
+    val isAxisEmailSyncing: Boolean = false,
     val themeMode: String = THEME_MODE_SYSTEM,
     val dailyReminderEnabled: Boolean = true,
     val dailyReminderHour: Int = 22,
@@ -121,6 +125,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isAiReviewEnabled = repository.isAiReviewEnabled(),
             isCloudAiEnabled = repository.isCloudAiEnabled(),
             cloudAiApiKey = repository.getCloudAiApiKey(),
+            axisEmailAccount = repository.getAxisEmailAccount(),
+            axisEmailAutoSyncEnabled = repository.isAxisEmailAutoSyncEnabled(),
+            axisEmailLastSyncMs = repository.getAxisEmailLastSyncMs(),
             themeMode = normalizeThemeMode(repository.getThemeMode()),
             dailyReminderEnabled = repository.isDailyReminderEnabled(),
             dailyReminderHour = repository.getDailyReminderHour(),
@@ -138,6 +145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var shouldRerunPendingProcessing = false
 
     init {
+        repository.ensureAxisEmailSyncSchedule()
         loadCustomizations()
         loadCurrentMonth()
         checkPendingCount()
@@ -214,9 +222,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isAppInForeground = isForeground
         if (isForeground) {
             checkPendingCount()
+            maybeSyncAxisEmailsInForeground()
             // Delegate to the foreground service — it handles both foreground
             // and background processing with the singleton Mutex guard.
             processPendingSmsWithAi()
+        }
+    }
+
+    private fun maybeSyncAxisEmailsInForeground() {
+        val state = _uiState.value
+        if (state.axisEmailAccount.isBlank() || !state.axisEmailAutoSyncEnabled || state.isAxisEmailSyncing) {
+            return
+        }
+        val staleEnough = System.currentTimeMillis() - state.axisEmailLastSyncMs > 15 * 60 * 1000L
+        if (staleEnough) {
+            syncAxisEmailsNow(silent = true)
         }
     }
 
@@ -258,6 +278,71 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateCloudAiApiKey(key: String) {
         repository.setCloudAiApiKey(key)
         _uiState.update { it.copy(cloudAiApiKey = key) }
+    }
+
+    fun connectAxisEmailAccount(email: String) {
+        if (email.isBlank()) {
+            _uiState.update { it.copy(debugStatusMessage = "Unable to read the selected Gmail account.") }
+            return
+        }
+        repository.connectAxisEmailAccount(email)
+        _uiState.update {
+            it.copy(
+                axisEmailAccount = repository.getAxisEmailAccount(),
+                axisEmailAutoSyncEnabled = repository.isAxisEmailAutoSyncEnabled(),
+                axisEmailLastSyncMs = repository.getAxisEmailLastSyncMs(),
+                debugStatusMessage = "Connected Gmail for Axis email sync."
+            )
+        }
+        syncAxisEmailsNow(silent = true)
+    }
+
+    fun disconnectAxisEmailAccount() {
+        repository.disconnectAxisEmailAccount()
+        _uiState.update {
+            it.copy(
+                axisEmailAccount = "",
+                axisEmailAutoSyncEnabled = false,
+                axisEmailLastSyncMs = 0L,
+                isAxisEmailSyncing = false,
+                debugStatusMessage = "Disconnected Gmail Axis sync."
+            )
+        }
+    }
+
+    fun toggleAxisEmailAutoSync(enabled: Boolean) {
+        repository.setAxisEmailAutoSyncEnabled(enabled)
+        _uiState.update {
+            it.copy(
+                axisEmailAutoSyncEnabled = repository.isAxisEmailAutoSyncEnabled(),
+                debugStatusMessage = if (enabled) {
+                    "Axis email auto-sync enabled."
+                } else {
+                    "Axis email auto-sync paused."
+                }
+            )
+        }
+    }
+
+    fun syncAxisEmailsNow(silent: Boolean = false) {
+        if (_uiState.value.axisEmailAccount.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isAxisEmailSyncing = true) }
+            val result = repository.syncAxisEmailsNow()
+            _uiState.update {
+                it.copy(
+                    isAxisEmailSyncing = false,
+                    axisEmailLastSyncMs = repository.getAxisEmailLastSyncMs(),
+                    debugStatusMessage = if (silent) {
+                        it.debugStatusMessage
+                    } else {
+                        result.message
+                    }
+                )
+            }
+            checkPendingCount()
+            loadCurrentMonth()
+        }
     }
 
     fun setThemeMode(mode: String) {
