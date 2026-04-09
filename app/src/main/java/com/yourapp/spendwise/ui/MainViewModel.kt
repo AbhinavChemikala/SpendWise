@@ -25,6 +25,7 @@ import com.yourapp.spendwise.data.TrendPoint
 import com.yourapp.spendwise.data.db.PendingSmsEntity
 import com.yourapp.spendwise.data.db.CategoryTotal
 import com.yourapp.spendwise.data.db.SmsReviewEntity
+import com.yourapp.spendwise.data.db.TransactionCategoryAiEntity
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
 import com.yourapp.spendwise.sms.AiProcessingService
@@ -105,7 +106,10 @@ data class DashboardUiState(
     val showManualAddDialog: Boolean = false,
     val isFindingSimilarTransactions: Boolean = false,
     val similarTransactionSourceId: Long? = null,
-    val similarTransactions: List<TransactionEntity> = emptyList()
+    val similarTransactions: List<TransactionEntity> = emptyList(),
+    val isScanningLegacyAiFailures: Boolean = false,
+    val categoryRefinementRecord: TransactionCategoryAiEntity? = null,
+    val categoryRefinementLoadingId: Long? = null
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -129,6 +133,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     private var transactionsJob: Job? = null
+    private var categoryRefinementJob: Job? = null
     private var isAppInForeground = false
     private var shouldRerunPendingProcessing = false
 
@@ -367,6 +372,103 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 similarTransactionSourceId = null,
                 similarTransactions = emptyList()
             )
+        }
+    }
+
+    fun observeCategoryRefinement(transactionId: Long) {
+        categoryRefinementJob?.cancel()
+        _uiState.update {
+            it.copy(
+                categoryRefinementLoadingId = transactionId,
+                categoryRefinementRecord = null
+            )
+        }
+        categoryRefinementJob = viewModelScope.launch {
+            repository.observeCategoryRefinementRecord(transactionId).collectLatest { record ->
+                _uiState.update {
+                    it.copy(
+                        categoryRefinementLoadingId = null,
+                        categoryRefinementRecord = record
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearCategoryRefinementObservation() {
+        categoryRefinementJob?.cancel()
+        categoryRefinementJob = null
+        _uiState.update {
+            it.copy(
+                categoryRefinementLoadingId = null,
+                categoryRefinementRecord = null
+            )
+        }
+    }
+
+    fun requestCategoryRefinement(transaction: TransactionEntity) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(categoryRefinementLoadingId = transaction.id) }
+            val requested = repository.requestCategoryRefinement(transaction.id)
+            _uiState.update {
+                it.copy(
+                    categoryRefinementLoadingId = if (requested) transaction.id else null,
+                    debugStatusMessage = if (requested) {
+                        "AI category check started for ${transaction.merchant}."
+                    } else {
+                        "AI category check is unavailable for ${transaction.merchant}."
+                    }
+                )
+            }
+        }
+    }
+
+    fun retryAiReview(item: SmsReviewEntity) {
+        viewModelScope.launch {
+            val retried = repository.retryAiReview(item.id)
+            _uiState.update {
+                it.copy(
+                    debugStatusMessage = if (retried) {
+                        "Retrying AI review for ${item.sender}."
+                    } else {
+                        "Unable to retry this AI review item."
+                    }
+                )
+            }
+            checkPendingCount()
+        }
+    }
+
+    fun retryAllFailedAiReviews() {
+        viewModelScope.launch {
+            val retriedCount = repository.retryAllFailedAiReviews()
+            _uiState.update {
+                it.copy(
+                    debugStatusMessage = if (retriedCount > 0) {
+                        "Retrying $retriedCount failed AI review items."
+                    } else {
+                        "No failed AI review items were ready to retry."
+                    }
+                )
+            }
+            checkPendingCount()
+        }
+    }
+
+    fun recoverLegacyAiFailures() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isScanningLegacyAiFailures = true) }
+            val recoveredCount = repository.recoverLegacyAiFailures()
+            _uiState.update {
+                it.copy(
+                    isScanningLegacyAiFailures = false,
+                    debugStatusMessage = if (recoveredCount > 0) {
+                        "Recovered $recoveredCount old AI timeout items for retry."
+                    } else {
+                        "No old timeout-style AI review items were found."
+                    }
+                )
+            }
         }
     }
 

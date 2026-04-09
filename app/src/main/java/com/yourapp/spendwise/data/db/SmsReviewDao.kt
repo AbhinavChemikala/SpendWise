@@ -37,13 +37,19 @@ interface SmsReviewDao {
         """
         SELECT * FROM (
             SELECT * FROM sms_review_events
-            WHERE finalStatus IN ('AI_CONFIRMED', 'AI_REJECTED')
+            WHERE finalStatus IN ('AI_CONFIRMED', 'AI_REJECTED', 'AI_FAILED')
             ORDER BY id DESC
             LIMIT 1000
         ) ORDER BY id ASC
         """
     )
     fun observeReviewCenter(): Flow<List<SmsReviewEntity>>
+
+    @Query("SELECT * FROM sms_review_events WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): SmsReviewEntity?
+
+    @Query("SELECT * FROM sms_review_events WHERE finalStatus = :status ORDER BY receivedAt DESC")
+    suspend fun getByStatus(status: String): List<SmsReviewEntity>
 
     @Query(
         """

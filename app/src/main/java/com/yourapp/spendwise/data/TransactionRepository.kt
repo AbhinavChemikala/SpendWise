@@ -3,16 +3,22 @@ package com.yourapp.spendwise.data
 import android.content.Context
 import android.provider.Telephony
 import android.telephony.SmsManager
+import com.google.gson.Gson
 import com.yourapp.spendwise.background.DailyReminderScheduler
+import com.yourapp.spendwise.background.TransactionCategoryRefinementWorker
 import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.CategoryTotal
 import com.yourapp.spendwise.data.db.MonthlySummary
+import com.yourapp.spendwise.data.db.PendingSmsEntity
 import com.yourapp.spendwise.data.db.SmsReviewEntity
+import com.yourapp.spendwise.data.db.TransactionCategoryAiEntity
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
 import com.yourapp.spendwise.sms.SmsIntakeOutcome
 import com.yourapp.spendwise.sms.SmsIntakeManager
 import com.yourapp.spendwise.sms.SmsProcessor
+import com.yourapp.spendwise.sms.AiProcessingService
+import com.yourapp.spendwise.sms.TransactionCategoryRefiner
 import com.yourapp.spendwise.widget.WidgetUpdater
 import java.time.LocalDate
 import java.time.YearMonth
@@ -157,15 +163,26 @@ class TransactionRepository(context: Context) {
     private val appContext = context.applicationContext
     private val database = AppDatabase.getInstance(appContext)
     private val transactionDao = database.transactionDao()
+    private val transactionCategoryAiDao = database.transactionCategoryAiDao()
     private val pendingSmsDao = database.pendingSmsDao()
     private val reviewDao = database.smsReviewDao()
     private val smsProcessor = SmsProcessor(appContext)
     private val settingsStore = SettingsStore(appContext)
+    private val gson = Gson()
 
     fun getTransactionsForMonth(year: Int, month: Int): Flow<List<TransactionEntity>> {
         val (startMs, endMs) = getMonthRange(year, month)
         return transactionDao.getTransactionsByMonth(startMs, endMs)
     }
+
+    fun observeCategoryRefinementRecord(transactionId: Long): Flow<TransactionCategoryAiEntity?> {
+        return transactionCategoryAiDao.observeByTransactionId(transactionId)
+    }
+
+    suspend fun getCategoryRefinementRecord(transactionId: Long): TransactionCategoryAiEntity? =
+        withContext(Dispatchers.IO) {
+            transactionCategoryAiDao.getByTransactionId(transactionId)
+        }
 
     suspend fun getMonthlySummary(year: Int, month: Int): MonthlySummary = withContext(Dispatchers.IO) {
         val (startMs, endMs) = getMonthRange(year, month)
@@ -253,28 +270,60 @@ class TransactionRepository(context: Context) {
         merchant: String,
         bank: String
     ) = withContext(Dispatchers.IO) {
-        val id = transactionDao.insert(
-            TransactionFactory.create(
-                context = appContext,
-                amount = amount,
-                type = type,
-                merchant = merchant,
-                bank = bank,
-                rawSms = "Manual entry for $merchant",
-                sourceSender = bank,
-                timestamp = System.currentTimeMillis(),
-                isVerifiedByAi = false,
-                verificationSource = "Manual Entry"
-            )
+        val transaction = TransactionFactory.create(
+            context = appContext,
+            amount = amount,
+            type = type,
+            merchant = merchant,
+            bank = bank,
+            rawSms = "Manual entry for $merchant",
+            sourceSender = bank,
+            timestamp = System.currentTimeMillis(),
+            isVerifiedByAi = false,
+            verificationSource = "Manual Entry"
         )
+        val id = transactionDao.insert(transaction)
+        if (id > 0L) {
+            scheduleCategoryRefinementIfNeeded(transaction.copy(id = id))
+        }
         WidgetUpdater.updateAll(appContext)
         id
     }
 
     suspend fun updateTransaction(transaction: TransactionEntity): Boolean = withContext(Dispatchers.IO) {
-        val normalized = normalizeTransaction(transaction)
+        val existing = transactionDao.getById(transaction.id) ?: return@withContext false
+        val normalized = normalizeTransaction(existing = existing, edited = transaction)
         val success = transactionDao.update(normalized) > 0
-        if (success) WidgetUpdater.updateAll(appContext)
+        if (success) {
+            if (didCategoryInputsChange(existing, normalized)) {
+                transactionCategoryAiDao.deleteByTransactionId(normalized.id)
+            }
+            WidgetUpdater.updateAll(appContext)
+        }
+        success
+    }
+
+    suspend fun requestCategoryRefinement(transactionId: Long): Boolean = withContext(Dispatchers.IO) {
+        val existing = transactionDao.getById(transactionId) ?: return@withContext false
+        if (existing.categoryDecisionSource == CategoryDecisionSource.RULE) {
+            return@withContext false
+        }
+        if (
+            existing.categoryRefinementStatus == CategoryRefinementStatus.PENDING ||
+            existing.categoryRefinementStatus == CategoryRefinementStatus.RUNNING
+        ) {
+            return@withContext true
+        }
+
+        val refreshed = existing.copy(
+            updatedAt = System.currentTimeMillis(),
+            categoryRefinementStatus = CategoryRefinementStatus.PENDING
+        )
+        val success = transactionDao.update(refreshed) > 0
+        if (success) {
+            transactionCategoryAiDao.deleteByTransactionId(transactionId)
+            scheduleCategoryRefinementIfNeeded(refreshed)
+        }
         success
     }
 
@@ -319,12 +368,17 @@ class TransactionRepository(context: Context) {
     ): Int = withContext(Dispatchers.IO) {
         if (targetTransactionIds.isEmpty()) return@withContext 0
 
-        val normalizedSource = normalizeTransaction(editedTransaction)
+        val sourceExisting = transactionDao.getById(editedTransaction.id)
+        val normalizedSource = normalizeTransaction(
+            existing = sourceExisting ?: editedTransaction,
+            edited = editedTransaction
+        )
         val candidates = transactionDao.getAllTransactionsList()
             .filter { it.id in targetTransactionIds && it.id != editedTransaction.id }
             .map { candidate ->
                 normalizeTransaction(
-                    candidate.copy(
+                    existing = candidate,
+                    edited = candidate.copy(
                         amount = normalizedSource.amount,
                         type = normalizedSource.type,
                         merchant = normalizedSource.merchant,
@@ -339,13 +393,19 @@ class TransactionRepository(context: Context) {
 
         if (candidates.isEmpty()) return@withContext 0
         val updatedCount = transactionDao.updateAll(candidates)
-        if (updatedCount > 0) WidgetUpdater.updateAll(appContext)
+        if (updatedCount > 0) {
+            candidates.forEach { transactionCategoryAiDao.deleteByTransactionId(it.id) }
+            WidgetUpdater.updateAll(appContext)
+        }
         updatedCount
     }
 
     suspend fun deleteTransaction(transactionId: Long): Boolean = withContext(Dispatchers.IO) {
         val success = transactionDao.deleteById(transactionId) > 0
-        if (success) WidgetUpdater.updateAll(appContext)
+        if (success) {
+            transactionCategoryAiDao.deleteByTransactionId(transactionId)
+            WidgetUpdater.updateAll(appContext)
+        }
         success
     }
 
@@ -354,9 +414,179 @@ class TransactionRepository(context: Context) {
     }
 
     suspend fun restoreTransaction(transaction: TransactionEntity): Boolean = withContext(Dispatchers.IO) {
-        val success = transactionDao.insert(transaction.copy(id = 0L)) != -1L
-        if (success) WidgetUpdater.updateAll(appContext)
+        val restored = transaction.copy(
+            id = 0L,
+            updatedAt = System.currentTimeMillis(),
+            categoryRefinementStatus = if (transaction.categoryDecisionSource == CategoryDecisionSource.RULE) {
+                CategoryRefinementStatus.SKIPPED_RULE
+            } else {
+                CategoryRefinementStatus.PENDING
+            }
+        )
+        val newId = transactionDao.insert(restored)
+        val success = newId != -1L
+        if (success) {
+            scheduleCategoryRefinementIfNeeded(restored.copy(id = newId))
+            WidgetUpdater.updateAll(appContext)
+        }
         success
+    }
+
+    suspend fun refineTransactionCategory(transactionId: Long) = withContext(Dispatchers.IO) {
+        val original = transactionDao.getById(transactionId) ?: return@withContext
+        if (original.categoryDecisionSource == CategoryDecisionSource.RULE) {
+            if (original.categoryRefinementStatus != CategoryRefinementStatus.SKIPPED_RULE) {
+                transactionDao.update(
+                    original.copy(categoryRefinementStatus = CategoryRefinementStatus.SKIPPED_RULE)
+                )
+            }
+            return@withContext
+        }
+
+        transactionDao.update(
+            original.copy(categoryRefinementStatus = CategoryRefinementStatus.RUNNING)
+        )
+
+        val startedAt = System.currentTimeMillis()
+        val resolution = TransactionCategoryResolver.resolveDetailed(
+            merchant = original.merchant,
+            rawSms = original.rawSms,
+            type = original.type
+        )
+        val allowedCategories = CategoryCatalog.allCategories(
+            customCategories = settingsStore.getCustomCategories(),
+            currentCategory = original.category
+        )
+        val analysis = TransactionCategoryRefiner.refine(
+            transaction = original,
+            resolution = resolution,
+            allowedCategories = allowedCategories,
+            settingsStore = settingsStore
+        )
+
+        val current = transactionDao.getById(transactionId) ?: return@withContext
+        if (current.updatedAt != original.updatedAt) {
+            upsertCategoryAiRecord(
+                transactionId = transactionId,
+                resolverCategory = resolution.category,
+                resolverSignalsJson = gson.toJson(resolution),
+                currentCategory = original.category,
+                suggestedCategory = analysis?.result?.suggestedCategory.orEmpty(),
+                confidence = analysis?.result?.confidence ?: 0.0,
+                reason = analysis?.result?.reason.orEmpty(),
+                model = analysis?.source ?: "",
+                rawJson = analysis?.rawResponse.orEmpty(),
+                outcome = CategoryRefinementStatus.SKIPPED_STALE,
+                outcomeDetail = "Transaction changed before AI refinement could be applied.",
+                startedAt = startedAt,
+                finishedAt = System.currentTimeMillis(),
+                keepCurrent = analysis?.result?.keepCurrent == true
+            )
+            return@withContext
+        }
+
+        val aiResult = analysis?.result
+        if (analysis == null || aiResult == null) {
+            transactionDao.update(current.copy(categoryRefinementStatus = CategoryRefinementStatus.FAILED))
+            upsertCategoryAiRecord(
+                transactionId = transactionId,
+                resolverCategory = resolution.category,
+                resolverSignalsJson = gson.toJson(resolution),
+                currentCategory = current.category,
+                suggestedCategory = "",
+                confidence = 0.0,
+                reason = "",
+                model = analysis?.source ?: "",
+                rawJson = analysis?.rawResponse.orEmpty(),
+                outcome = CategoryRefinementStatus.FAILED,
+                outcomeDetail = "AI did not return a usable category suggestion.",
+                startedAt = startedAt,
+                finishedAt = System.currentTimeMillis(),
+                keepCurrent = false
+            )
+            return@withContext
+        }
+
+        val normalizedSuggestion = allowedCategories.firstOrNull {
+            it.equals(aiResult.suggestedCategory.trim(), ignoreCase = true)
+        }
+        if (normalizedSuggestion == null) {
+            transactionDao.update(current.copy(categoryRefinementStatus = CategoryRefinementStatus.KEPT_RESOLVER))
+            upsertCategoryAiRecord(
+                transactionId = transactionId,
+                resolverCategory = resolution.category,
+                resolverSignalsJson = gson.toJson(resolution),
+                currentCategory = current.category,
+                suggestedCategory = aiResult.suggestedCategory,
+                confidence = aiResult.confidence,
+                reason = aiResult.reason,
+                model = analysis.source,
+                rawJson = analysis.rawResponse,
+                outcome = CategoryRefinementStatus.KEPT_RESOLVER,
+                outcomeDetail = "AI suggested a category outside SpendWise's allowed list.",
+                startedAt = startedAt,
+                finishedAt = System.currentTimeMillis(),
+                keepCurrent = aiResult.keepCurrent
+            )
+            return@withContext
+        }
+
+        val shouldKeepResolver = aiResult.keepCurrent ||
+            aiResult.confidence < 0.85 ||
+            normalizedSuggestion.equals(current.category, ignoreCase = true)
+
+        if (shouldKeepResolver) {
+            transactionDao.update(current.copy(categoryRefinementStatus = CategoryRefinementStatus.KEPT_RESOLVER))
+            upsertCategoryAiRecord(
+                transactionId = transactionId,
+                resolverCategory = resolution.category,
+                resolverSignalsJson = gson.toJson(resolution),
+                currentCategory = current.category,
+                suggestedCategory = normalizedSuggestion,
+                confidence = aiResult.confidence,
+                reason = aiResult.reason,
+                model = analysis.source,
+                rawJson = analysis.rawResponse,
+                outcome = CategoryRefinementStatus.KEPT_RESOLVER,
+                outcomeDetail = if (aiResult.keepCurrent) {
+                    "AI agreed the current category should stay."
+                } else if (normalizedSuggestion.equals(current.category, ignoreCase = true)) {
+                    "AI reached the same category SpendWise already picked."
+                } else {
+                    "Confidence was below the auto-apply threshold."
+                },
+                startedAt = startedAt,
+                finishedAt = System.currentTimeMillis(),
+                keepCurrent = aiResult.keepCurrent
+            )
+            return@withContext
+        }
+
+        transactionDao.update(
+            current.copy(
+                category = normalizedSuggestion,
+                updatedAt = System.currentTimeMillis(),
+                categoryDecisionSource = CategoryDecisionSource.AI,
+                categoryRefinementStatus = CategoryRefinementStatus.APPLIED
+            )
+        )
+        upsertCategoryAiRecord(
+            transactionId = transactionId,
+            resolverCategory = resolution.category,
+            resolverSignalsJson = gson.toJson(resolution),
+            currentCategory = current.category,
+            suggestedCategory = normalizedSuggestion,
+            confidence = aiResult.confidence,
+            reason = aiResult.reason,
+            model = analysis.source,
+            rawJson = analysis.rawResponse,
+            outcome = CategoryRefinementStatus.APPLIED,
+            outcomeDetail = "AI refinement replaced the resolver category.",
+            startedAt = startedAt,
+            finishedAt = System.currentTimeMillis(),
+            keepCurrent = aiResult.keepCurrent
+        )
+        WidgetUpdater.updateAll(appContext)
     }
 
     suspend fun simulateIncomingSms(sender: String, body: String): SmsIntakeOutcome = withContext(Dispatchers.IO) {
@@ -548,22 +778,185 @@ class TransactionRepository(context: Context) {
 
     fun observeImportSourceEvents() = reviewDao.observeSourceEvents("IMPORT")
 
-    private fun normalizeTransaction(transaction: TransactionEntity): TransactionEntity {
-        return transaction.copy(
-            merchant = MerchantNormalizer.normalize(transaction.merchant, transaction.rawSms),
-            category = if (transaction.category.isBlank()) {
-                TransactionCategoryResolver.resolve(
-                    merchant = transaction.merchant,
-                    rawSms = transaction.rawSms,
-                    type = transaction.type
-                )
-            } else {
-                transaction.category
-            },
-            paymentMode = PaymentModeResolver.resolve(
-                rawSms = transaction.rawSms,
-                merchant = transaction.merchant
+    suspend fun retryAiReview(eventId: Long): Boolean = withContext(Dispatchers.IO) {
+        val event = reviewDao.getById(eventId) ?: return@withContext false
+        if (event.finalStatus != "AI_FAILED") return@withContext false
+        if (pendingSmsDao.exists(event.sender, event.body, event.receivedAt)) return@withContext true
+
+        reviewDao.updateOutcome(
+            eventId = event.id,
+            finalStatus = "QUEUED_FOR_AI",
+            transactionId = null,
+            aiJson = "",
+            aiReason = "",
+            aiEngine = event.aiEngine.ifBlank { "Gemini Nano" },
+            debugLog = "${event.debugLog}\nretry=manual\nfinal=queued_for_ai_retry"
+        )
+        val pendingId = pendingSmsDao.insert(
+            PendingSmsEntity(
+                sender = event.sender,
+                body = event.body,
+                receivedAt = event.receivedAt,
+                reviewEventId = event.id
             )
+        )
+        if (pendingId == -1L) return@withContext false
+        AiProcessingService.start(appContext)
+        true
+    }
+
+    suspend fun retryAllFailedAiReviews(): Int = withContext(Dispatchers.IO) {
+        val failedEvents = reviewDao.getByStatus("AI_FAILED")
+        var retriedCount = 0
+        failedEvents.forEach { event ->
+            if (pendingSmsDao.exists(event.sender, event.body, event.receivedAt)) {
+                retriedCount += 1
+                return@forEach
+            }
+            reviewDao.updateOutcome(
+                eventId = event.id,
+                finalStatus = "QUEUED_FOR_AI",
+                transactionId = null,
+                aiJson = "",
+                aiReason = "",
+                aiEngine = event.aiEngine.ifBlank { "Gemini Nano" },
+                debugLog = "${event.debugLog}\nretry=batch\nfinal=queued_for_ai_retry"
+            )
+            val pendingId = pendingSmsDao.insert(
+                PendingSmsEntity(
+                    sender = event.sender,
+                    body = event.body,
+                    receivedAt = event.receivedAt,
+                    reviewEventId = event.id
+                )
+            )
+            if (pendingId != -1L) {
+                retriedCount += 1
+            }
+        }
+        if (retriedCount > 0) {
+            AiProcessingService.start(appContext)
+        }
+        retriedCount
+    }
+
+    suspend fun recoverLegacyAiFailures(): Int = withContext(Dispatchers.IO) {
+        val rejectedEvents = reviewDao.getByStatus("AI_REJECTED")
+        var recoveredCount = 0
+        rejectedEvents.forEach { event ->
+            val reason = event.aiReason.lowercase()
+            val debugLog = event.debugLog.lowercase()
+            val looksLikeLegacyFailure =
+                "no response" in reason ||
+                    "timeout" in reason ||
+                    "model unavailable" in reason ||
+                    "ai_error_rejected" in debugLog
+
+            if (!looksLikeLegacyFailure) return@forEach
+
+            reviewDao.updateOutcome(
+                eventId = event.id,
+                finalStatus = "AI_FAILED",
+                transactionId = null,
+                aiJson = event.aiJson,
+                aiReason = event.aiReason.ifBlank {
+                    "AI model returned no usable response."
+                },
+                aiEngine = event.aiEngine.ifBlank { "Unknown" },
+                debugLog = "${event.debugLog}\nrecovered=legacy_timeout\nfinal=ai_failed"
+            )
+            recoveredCount += 1
+        }
+        recoveredCount
+    }
+
+    private suspend fun upsertCategoryAiRecord(
+        transactionId: Long,
+        resolverCategory: String,
+        resolverSignalsJson: String,
+        currentCategory: String,
+        suggestedCategory: String,
+        confidence: Double,
+        reason: String,
+        model: String,
+        rawJson: String,
+        outcome: String,
+        outcomeDetail: String,
+        startedAt: Long,
+        finishedAt: Long,
+        keepCurrent: Boolean
+    ) {
+        transactionCategoryAiDao.upsert(
+            TransactionCategoryAiEntity(
+                transactionId = transactionId,
+                resolverCategory = resolverCategory,
+                resolverSignalsJson = resolverSignalsJson,
+                currentCategory = currentCategory,
+                suggestedCategory = suggestedCategory,
+                confidence = confidence,
+                reason = reason,
+                model = model,
+                rawJson = rawJson,
+                outcome = outcome,
+                outcomeDetail = outcomeDetail,
+                startedAt = startedAt,
+                finishedAt = finishedAt,
+                keepCurrent = keepCurrent
+            )
+        )
+    }
+
+    private fun scheduleCategoryRefinementIfNeeded(transaction: TransactionEntity) {
+        if (transaction.id <= 0L) return
+        if (transaction.categoryDecisionSource == CategoryDecisionSource.RULE) return
+        if (transaction.categoryRefinementStatus != CategoryRefinementStatus.PENDING) return
+        TransactionCategoryRefinementWorker.enqueue(appContext, transaction.id)
+    }
+
+    private fun didCategoryInputsChange(
+        existing: TransactionEntity,
+        updated: TransactionEntity
+    ): Boolean {
+        return existing.merchant != updated.merchant ||
+            existing.type != updated.type ||
+            existing.category != updated.category
+    }
+
+    private fun normalizeTransaction(
+        existing: TransactionEntity,
+        edited: TransactionEntity
+    ): TransactionEntity {
+        val normalizedMerchant = MerchantNormalizer.normalize(edited.merchant, edited.rawSms)
+        val normalizedCategory = edited.category.trim().ifBlank {
+            TransactionCategoryResolver.resolve(
+                merchant = normalizedMerchant,
+                rawSms = edited.rawSms,
+                type = edited.type
+            )
+        }
+        val categoryInputsChanged = existing.merchant != normalizedMerchant ||
+            existing.type != edited.type ||
+            existing.category != normalizedCategory
+
+        return edited.copy(
+            merchant = normalizedMerchant,
+            category = normalizedCategory,
+            paymentMode = PaymentModeResolver.resolve(
+                rawSms = edited.rawSms,
+                merchant = normalizedMerchant
+            ),
+            updatedAt = System.currentTimeMillis(),
+            categoryDecisionSource = if (categoryInputsChanged) {
+                CategoryDecisionSource.USER_EDIT
+            } else {
+                existing.categoryDecisionSource
+            },
+            categoryRefinementStatus = if (categoryInputsChanged) {
+                CategoryRefinementStatus.NONE
+            } else {
+                existing.categoryRefinementStatus
+            },
+            categoryRuleName = if (categoryInputsChanged) "" else existing.categoryRuleName
         )
     }
 

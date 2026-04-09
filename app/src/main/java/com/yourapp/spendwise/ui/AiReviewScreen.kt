@@ -24,13 +24,16 @@ import java.util.*
 @Composable
 fun AiReviewScreen(
     modifier: Modifier = Modifier,
-    uiState: DashboardUiState
+    uiState: DashboardUiState,
+    onRetryItem: (SmsReviewEntity) -> Unit,
+    onRetryAllFailed: () -> Unit
 ) {
     val items = uiState.reviewCenterItems
     val listState = rememberLazyListState()
     val currentAiItem = uiState.currentAiReviewItem
     val engineName = if (uiState.isCloudAiEnabled && uiState.cloudAiApiKey.isNotBlank())
         "Gemma 3 27B" else "Gemini Nano"
+    val failedCount = items.count { it.finalStatus == "AI_FAILED" }
 
     LaunchedEffect(items.size, currentAiItem) {
         val targetIndex = if (currentAiItem != null) items.size + 1 else items.size
@@ -46,10 +49,22 @@ fun AiReviewScreen(
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            ScreenHeader(
-                title = "AI Review Center",
-                subtitle = "Engine: $engineName · reviewing your messages"
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ScreenHeader(
+                    title = "AI Review Center",
+                    subtitle = "Engine: $engineName · reviewing your messages"
+                )
+                if (failedCount > 0) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = onRetryAllFailed) {
+                            Text("Retry all failed ($failedCount)", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
         }
 
         if (items.isEmpty() && currentAiItem == null) {
@@ -58,7 +73,7 @@ fun AiReviewScreen(
             }
         } else {
             items(items, key = { it.id }) { item ->
-                ChatBubblePair(item = item)
+                ChatBubblePair(item = item, onRetry = onRetryItem)
             }
             if (currentAiItem != null) {
                 item {
@@ -70,7 +85,10 @@ fun AiReviewScreen(
 }
 
 @Composable
-private fun ChatBubblePair(item: SmsReviewEntity) {
+private fun ChatBubblePair(
+    item: SmsReviewEntity,
+    onRetry: (SmsReviewEntity) -> Unit
+) {
     val timeFormatted = rememberTimeFormatted(item.receivedAt)
 
     Column(
@@ -148,11 +166,7 @@ private fun ChatBubblePair(item: SmsReviewEntity) {
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    val (statusColor, statusText) = when (item.finalStatus) {
-                        "AI_CONFIRMED" -> AccentTeal to "Accepted"
-                        "AI_REJECTED" -> AccentPink to "Rejected"
-                        else -> AccentAmber to "Pending/Skipped"
-                    }
+                    val (statusColor, statusText) = aiReviewStatusPresentation(item.finalStatus)
                     Surface(
                         color = statusColor.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(8.dp)
@@ -177,6 +191,17 @@ private fun ChatBubblePair(item: SmsReviewEntity) {
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
+                if (item.finalStatus == "AI_FAILED") {
+                    FilledTonalButton(
+                        onClick = { onRetry(item) },
+                        modifier = Modifier.align(Alignment.End),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Retry")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 if (item.aiJson.isNotBlank()) {
                     Box(
                         modifier = Modifier
@@ -194,6 +219,15 @@ private fun ChatBubblePair(item: SmsReviewEntity) {
                 }
             }
         }
+    }
+}
+
+private fun aiReviewStatusPresentation(finalStatus: String): Pair<Color, String> {
+    return when (finalStatus) {
+        "AI_CONFIRMED" -> AccentTeal to "Accepted"
+        "AI_REJECTED" -> AccentPink to "Rejected"
+        "AI_FAILED" -> AccentAmber to "Retry needed"
+        else -> AccentAmber to "Pending/Skipped"
     }
 }
 

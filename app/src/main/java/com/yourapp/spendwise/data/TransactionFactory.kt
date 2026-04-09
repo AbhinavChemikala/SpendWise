@@ -24,23 +24,26 @@ object TransactionFactory {
         aiCardType: String = ""
     ): TransactionEntity {
         val settingsStore = SettingsStore(context.applicationContext)
+        val now = System.currentTimeMillis()
         val safeMerchant = MerchantNormalizer.normalize(merchant, rawSms)
         val safeBank = bank.ifBlank { "Unknown" }
-        val resolvedCategory = TransactionCategoryResolver.resolve(
+        val resolution = TransactionCategoryResolver.resolveDetailed(
             merchant = safeMerchant,
             rawSms = rawSms,
             type = type
         )
-        val enrichedDraft = TransactionRuleEngine.applyRules(
+        val ruleResult = TransactionRuleEngine.applyRulesDetailed(
             draft = TransactionDraft(
                 merchant = safeMerchant,
                 bank = safeBank,
                 rawSms = rawSms,
                 sourceSender = sourceSender,
-                category = resolvedCategory
+                category = resolution.category
             ),
             rules = settingsStore.getRules()
         )
+        val enrichedDraft = ruleResult.draft
+        val matchedRule = ruleResult.matchedRule
         return TransactionEntity(
             amount = amount,
             type = type,
@@ -65,7 +68,19 @@ object TransactionFactory {
                 bank      = enrichedDraft.bank,
                 aiCardLast4 = aiCardLast4,
                 aiCardType  = aiCardType
-            )
+            ),
+            updatedAt = now,
+            categoryDecisionSource = if (matchedRule != null) {
+                CategoryDecisionSource.RULE
+            } else {
+                CategoryDecisionSource.RESOLVER
+            },
+            categoryRefinementStatus = if (matchedRule != null) {
+                CategoryRefinementStatus.SKIPPED_RULE
+            } else {
+                CategoryRefinementStatus.PENDING
+            },
+            categoryRuleName = matchedRule?.name?.trim().orEmpty()
         )
     }
 }

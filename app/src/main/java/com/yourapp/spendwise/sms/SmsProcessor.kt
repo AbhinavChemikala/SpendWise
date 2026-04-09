@@ -2,6 +2,7 @@ package com.yourapp.spendwise.sms
 
 import android.content.Context
 import android.util.Log
+import com.yourapp.spendwise.background.TransactionCategoryRefinementWorker
 import com.yourapp.spendwise.data.SettingsStore
 import com.yourapp.spendwise.data.TransactionFactory
 import com.yourapp.spendwise.data.db.AppDatabase
@@ -24,6 +25,7 @@ class SmsProcessor(context: Context) {
 
     companion object {
         private const val TAG = "SmsProcessor"
+        private const val MAX_ANALYSIS_ATTEMPTS = 3
         // Singleton-level mutex — shared across ALL SmsProcessor instances so
         // two concurrent callers (e.g. foreground + pipeline event) never race.
         private val drainMutex = Mutex()
@@ -46,25 +48,21 @@ class SmsProcessor(context: Context) {
                 // Report that we're starting work on this item
                 onProgress(index, pendingSms.size, pending)
 
-                val analysis = analyzeWithFallback(pending.sender, pending.body)
+                val analysis = analyzeWithRetry(pending.sender, pending.body)
                 val aiResult = analysis?.result
 
-                // --- FIX: Never silently skip ---
-                // If AI returned null (model error, malformed JSON, timeout),
-                // mark the item as rejected with an error reason so it gets
-                // cleared from the queue and never blocks future processing.
                 if (analysis == null || aiResult == null) {
                     withContext(Dispatchers.IO) {
                         pendingSmsDao.deleteById(pending.id)
                         pending.reviewEventId?.let { eventId ->
                             reviewDao.updateOutcome(
                                 eventId = eventId,
-                                finalStatus = "AI_REJECTED",
+                                finalStatus = "AI_FAILED",
                                 transactionId = null,
                                 aiJson = "",
-                                aiReason = "AI model returned no response (timeout or model unavailable).",
+                                aiReason = "AI model returned no usable response after $MAX_ANALYSIS_ATTEMPTS attempts.",
                                 aiEngine = "Unknown",
-                                debugLog = "${SmsPreFilter.buildDebugLog(pending.sender, pending.body)}\nai=null\nfinal=ai_error_rejected"
+                                debugLog = "${SmsPreFilter.buildDebugLog(pending.sender, pending.body)}\nai=null\nfinal=ai_failed"
                             )
                         }
                     }
@@ -118,6 +116,9 @@ class SmsProcessor(context: Context) {
                     var insertedId = -1L
                     withContext(Dispatchers.IO) {
                         insertedId = transactionDao.insert(transaction)
+                        if (insertedId > 0L) {
+                            TransactionCategoryRefinementWorker.enqueue(appContext, insertedId)
+                        }
                         WidgetUpdater.updateAll(appContext)
                         pendingSmsDao.deleteById(pending.id)
                         pending.reviewEventId?.let { eventId ->
@@ -192,6 +193,22 @@ class SmsProcessor(context: Context) {
             }
         }
         return GeminiNanoAnalyzer.analyzeDetailed(smsSender = sender, smsBody = body)
+    }
+
+    private suspend fun analyzeWithRetry(
+        sender: String,
+        body: String
+    ): AiAnalysisOutput? {
+        repeat(MAX_ANALYSIS_ATTEMPTS) { attempt ->
+            val result = analyzeWithFallback(sender, body)
+            if (result?.result != null) {
+                return result
+            }
+            if (attempt < MAX_ANALYSIS_ATTEMPTS - 1) {
+                delay((attempt + 1) * 1200L)
+            }
+        }
+        return null
     }
 
     private fun String.toTransactionType(): TransactionType {

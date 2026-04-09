@@ -15,12 +15,21 @@ object TransactionRuleEngine {
         draft: TransactionDraft,
         rules: List<TransactionRule>
     ): TransactionDraft {
-        val matchingRule = rules.firstOrNull { rule -> matches(rule, draft) } ?: return draft
-        return draft.copy(
+        return applyRulesDetailed(draft = draft, rules = rules).draft
+    }
+
+    fun applyRulesDetailed(
+        draft: TransactionDraft,
+        rules: List<TransactionRule>
+    ): RuleApplicationResult {
+        val matchingRule = rules.firstOrNull { rule -> matches(rule, draft) }
+            ?: return RuleApplicationResult(draft = draft)
+        val enrichedDraft = draft.copy(
             merchant = matchingRule.assignMerchant.ifBlank { draft.merchant },
             bank = matchingRule.assignBank.ifBlank { draft.bank },
             category = matchingRule.assignCategory.ifBlank { draft.category }
         )
+        return RuleApplicationResult(draft = enrichedDraft, matchedRule = matchingRule)
     }
 
     private fun matches(rule: TransactionRule, draft: TransactionDraft): Boolean {

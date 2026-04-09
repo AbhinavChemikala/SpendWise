@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.PackageManager
+import com.google.gson.Gson
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -138,6 +139,10 @@ import com.yourapp.spendwise.data.BudgetGoal
 import com.yourapp.spendwise.data.BudgetProgress
 import com.yourapp.spendwise.data.AnomalyAlert
 import com.yourapp.spendwise.data.CashflowDay
+import com.yourapp.spendwise.data.CategoryCatalog
+import com.yourapp.spendwise.data.CategoryDecisionSource
+import com.yourapp.spendwise.data.CategoryResolution
+import com.yourapp.spendwise.data.CategoryRefinementStatus
 import com.yourapp.spendwise.data.CompareMetric
 import com.yourapp.spendwise.data.DuplicateInsight
 import com.yourapp.spendwise.data.InsightFact
@@ -151,6 +156,7 @@ import com.yourapp.spendwise.data.TransactionRule
 import com.yourapp.spendwise.data.TrendPoint
 import com.yourapp.spendwise.data.db.CategoryTotal
 import com.yourapp.spendwise.data.db.SmsReviewEntity
+import com.yourapp.spendwise.data.db.TransactionCategoryAiEntity
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
 import java.text.NumberFormat
@@ -167,6 +173,7 @@ internal val AccentTeal = Color(0xFF24B6D3)
 internal val AccentPurple = Color(0xFF6F49FF)
 internal val AccentGreen = Color(0xFF2E8B57)
 internal val AccentAmber = Color(0xFFF5A623)
+private val SpendWiseUiGson = Gson()
 
 private data class DebugSmsTemplate(
     val title: String,
@@ -368,7 +375,11 @@ fun SpendWiseApp(vm: MainViewModel) {
         )
     }
 
-    selectedTransaction?.let { transaction ->
+    val activeSelectedTransaction = selectedTransaction?.id?.let { selectedId ->
+        uiState.transactions.firstOrNull { it.id == selectedId } ?: selectedTransaction
+    }
+
+    activeSelectedTransaction?.let { transaction ->
         TransactionDetailDialog(
             transaction = transaction,
             initialMode = transactionDialogMode,
@@ -380,7 +391,15 @@ fun SpendWiseApp(vm: MainViewModel) {
             } else {
                 emptyList()
             },
-            onDismiss = { selectedTransaction = null },
+            categoryRefinementRecord = uiState.categoryRefinementRecord?.takeIf { it.transactionId == transaction.id },
+            isCategoryRefinementLoading = uiState.categoryRefinementLoadingId == transaction.id,
+            onObserveCategoryRefinement = vm::observeCategoryRefinement,
+            onClearCategoryRefinementObservation = vm::clearCategoryRefinementObservation,
+            onRequestCategoryRefinement = vm::requestCategoryRefinement,
+            onDismiss = {
+                vm.clearCategoryRefinementObservation()
+                selectedTransaction = null
+            },
             onSave = { updated ->
                 vm.updateTransaction(updated)
                 selectedTransaction = updated
@@ -458,7 +477,9 @@ fun SpendWiseApp(vm: MainViewModel) {
 
             SpendWiseTab.REVIEW_CENTER -> AiReviewScreen(
                 modifier = Modifier.padding(innerPadding),
-                uiState = uiState
+                uiState = uiState,
+                onRetryItem = vm::retryAiReview,
+                onRetryAllFailed = vm::retryAllFailedAiReviews
             )
 
             SpendWiseTab.SETTINGS -> SettingsScreen(
@@ -491,6 +512,7 @@ fun SpendWiseApp(vm: MainViewModel) {
                 onToggleAiReview = vm::toggleAiReview,
                 onToggleCloudAi = vm::toggleCloudAi,
                 onUpdateCloudAiApiKey = vm::updateCloudAiApiKey,
+                onRecoverLegacyAiFailures = vm::recoverLegacyAiFailures,
                 onSetThemeMode = vm::setThemeMode,
                 onToggleDailyReminder = vm::toggleDailyReminder,
                 onSetDailyReminderTime = vm::setDailyReminderTime,
@@ -993,6 +1015,7 @@ private fun SettingsScreen(
     onToggleAiReview: (Boolean) -> Unit,
     onToggleCloudAi: (Boolean) -> Unit,
     onUpdateCloudAiApiKey: (String) -> Unit,
+    onRecoverLegacyAiFailures: () -> Unit,
     onSetThemeMode: (String) -> Unit,
     onToggleDailyReminder: (Boolean) -> Unit,
     onSetDailyReminderTime: (Int, Int) -> Unit,
@@ -1153,6 +1176,40 @@ private fun SettingsScreen(
                             checked = uiState.isAiReviewEnabled,
                             onCheckedChange = onToggleAiReview
                         )
+                    }
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("Legacy AI recovery", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = "Scan older AI review items that were marked rejected because the model timed out or returned nothing, and convert them into retryable failures.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(
+                            onClick = onRecoverLegacyAiFailures,
+                            enabled = !uiState.isScanningLegacyAiFailures
+                        ) {
+                            if (uiState.isScanningLegacyAiFailures) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Scanning")
+                            } else {
+                                Text("Scan once")
+                            }
+                        }
                     }
                 }
             }
@@ -2946,6 +3003,11 @@ private fun TransactionDetailDialog(
     availableCategories: List<String>,
     isFindingSimilarTransactions: Boolean,
     similarTransactions: List<TransactionEntity>,
+    categoryRefinementRecord: TransactionCategoryAiEntity?,
+    isCategoryRefinementLoading: Boolean,
+    onObserveCategoryRefinement: (Long) -> Unit,
+    onClearCategoryRefinementObservation: () -> Unit,
+    onRequestCategoryRefinement: (TransactionEntity) -> Unit,
     onDismiss: () -> Unit,
     onSave: (TransactionEntity) -> Unit,
     onFindSimilar: (TransactionEntity) -> Unit,
@@ -2968,6 +3030,7 @@ private fun TransactionDetailDialog(
     var showNoteEditor by rememberSaveable(transaction.id) { mutableStateOf(false) }
     var showCategoryPicker by rememberSaveable(transaction.id) { mutableStateOf(false) }
     var showSimilarSheet by rememberSaveable(transaction.id) { mutableStateOf(false) }
+    var showAiDecisionSheet by rememberSaveable(transaction.id) { mutableStateOf(false) }
 
     val selectedType = if (selectedTypeIndex == 0) TransactionType.DEBIT else TransactionType.CREDIT
     val editedTransaction = transaction.copy(
@@ -2999,6 +3062,23 @@ private fun TransactionDetailDialog(
     val detailStroke = colorScheme.outline.copy(alpha = 0.45f)
     val detailOnSurface = colorScheme.onSurface
     val detailMuted = colorScheme.onSurfaceVariant
+    val isAiRunning = isCategoryRefinementLoading ||
+        transaction.categoryRefinementStatus == CategoryRefinementStatus.PENDING ||
+        transaction.categoryRefinementStatus == CategoryRefinementStatus.RUNNING
+    val canRequestAiRefinement = transaction.categoryDecisionSource != CategoryDecisionSource.RULE &&
+        !isAiRunning
+    val canOpenAiInsight = transaction.categoryDecisionSource == CategoryDecisionSource.RULE ||
+        categoryRefinementRecord != null ||
+        transaction.categoryRefinementStatus != CategoryRefinementStatus.NONE ||
+        isCategoryRefinementLoading ||
+        canRequestAiRefinement
+
+    LaunchedEffect(transaction.id) {
+        onObserveCategoryRefinement(transaction.id)
+    }
+    DisposableEffect(transaction.id) {
+        onDispose { onClearCategoryRefinementObservation() }
+    }
 
     if (showAmountEditor) {
         TransactionTextEditorDialog(
@@ -3152,6 +3232,55 @@ private fun TransactionDetailDialog(
                                 )
                                 Icon(Icons.Rounded.Edit, contentDescription = "Edit note", tint = detailMuted, modifier = Modifier.size(18.dp))
                             }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                AssistChip(
+                                    onClick = {},
+                                    enabled = false,
+                                    label = {
+                                        Text(
+                                            categoryRefinementStatusLabel(
+                                                status = transaction.categoryRefinementStatus,
+                                                source = transaction.categoryDecisionSource
+                                            )
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Rounded.Psychology,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        disabledContainerColor = colorScheme.surfaceVariant,
+                                        disabledLabelColor = detailOnSurface,
+                                        disabledLeadingIconContentColor = AccentPurple
+                                    )
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (canRequestAiRefinement) {
+                                        TextButton(onClick = { onRequestCategoryRefinement(transaction) }) {
+                                            Text("Run AI", color = AccentPurple, fontWeight = FontWeight.Black)
+                                        }
+                                    }
+                                    if (canOpenAiInsight) {
+                                        IconButton(onClick = { showAiDecisionSheet = true }) {
+                                            Icon(
+                                                Icons.Rounded.Psychology,
+                                                contentDescription = "AI category details",
+                                                tint = AccentPurple
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -3259,7 +3388,268 @@ private fun TransactionDetailDialog(
                     }
                 )
             }
+
+            if (showAiDecisionSheet) {
+                CategoryAiDecisionSheet(
+                    transaction = transaction,
+                    refinementRecord = categoryRefinementRecord,
+                    isLoading = isCategoryRefinementLoading,
+                    onRequestCategoryRefinement = { onRequestCategoryRefinement(transaction) },
+                    onDismiss = { showAiDecisionSheet = false }
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun CategoryAiDecisionSheet(
+    transaction: TransactionEntity,
+    refinementRecord: TransactionCategoryAiEntity?,
+    isLoading: Boolean,
+    onRequestCategoryRefinement: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val canRequestAiRefinement = transaction.categoryDecisionSource != CategoryDecisionSource.RULE &&
+        transaction.categoryRefinementStatus != CategoryRefinementStatus.PENDING &&
+        transaction.categoryRefinementStatus != CategoryRefinementStatus.RUNNING &&
+        !isLoading
+    val resolution = remember(refinementRecord?.resolverSignalsJson) {
+        refinementRecord?.resolverSignalsJson
+            ?.takeIf { it.isNotBlank() }
+            ?.let { raw ->
+                runCatching { SpendWiseUiGson.fromJson(raw, CategoryResolution::class.java) }.getOrNull()
+            }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.68f)),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss)
+        )
+        Card(
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+            border = BorderStroke(1.dp, colorScheme.outline.copy(alpha = 0.4f)),
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.74f)
+        ) {
+            LazyColumn(
+                contentPadding = PaddingValues(18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("AI category review", color = colorScheme.onSurface, fontWeight = FontWeight.Black)
+                            Text(
+                                categoryRefinementStatusDescription(
+                                    status = transaction.categoryRefinementStatus,
+                                    source = transaction.categoryDecisionSource
+                                ),
+                                color = colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Close", tint = colorScheme.onSurface)
+                        }
+                    }
+                }
+                item {
+                    DetailInfoCard(
+                        title = "Current category",
+                        value = transaction.category,
+                        supporting = "Decision source: ${decisionSourceLabel(transaction.categoryDecisionSource)}"
+                    )
+                }
+                if (isLoading) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(18.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator(color = AccentPurple)
+                                Text("AI is refining this category.", color = colorScheme.onSurface, fontWeight = FontWeight.Black)
+                                Text(
+                                    "SpendWise already saved the transaction and is double-checking the category in the background.",
+                                    color = colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                } else if (refinementRecord != null) {
+                    item {
+                        DetailInfoCard(
+                            title = "AI suggestion",
+                            value = refinementRecord.suggestedCategory.ifBlank { transaction.category },
+                            supporting = buildString {
+                                val outcomeLabel = refinementRecord.outcome
+                                    .replace('_', ' ')
+                                    .lowercase(Locale.ENGLISH)
+                                    .replaceFirstChar { it.uppercase() }
+                                append("Outcome: ")
+                                append(outcomeLabel)
+                                append(" • Confidence: ")
+                                append((refinementRecord.confidence * 100).toInt())
+                                append("%")
+                            }
+                        )
+                    }
+                    item {
+                        DetailInfoCard(
+                            title = "AI reason",
+                            value = refinementRecord.reason.ifBlank { "No extra explanation returned." },
+                            supporting = refinementRecord.outcomeDetail.ifBlank { "No additional outcome detail." }
+                        )
+                    }
+                    item {
+                        DetailInfoCard(
+                            title = "Model",
+                            value = refinementRecord.model.ifBlank { "Unknown" },
+                            supporting = formatDate(refinementRecord.finishedAt)
+                        )
+                    }
+                    item {
+                        DetailInfoCard(
+                            title = "Resolver guess",
+                            value = refinementRecord.resolverCategory,
+                            supporting = buildString {
+                                append("Bucket: ")
+                                append(resolution?.bucketLabel ?: "Unknown")
+                                val keywords = resolution?.matchedKeywords.orEmpty()
+                                if (keywords.isNotEmpty()) {
+                                    append(" • Keywords: ")
+                                    append(keywords.joinToString(", "))
+                                }
+                            }
+                        )
+                    }
+                } else if (transaction.categoryDecisionSource == CategoryDecisionSource.RULE) {
+                    item {
+                        DetailInfoCard(
+                            title = "Rule locked",
+                            value = transaction.categoryRuleName.ifBlank { "A matching SpendWise rule set this category." },
+                            supporting = "AI did not run because user rules are treated as the final authority."
+                        )
+                    }
+                } else {
+                    item {
+                        DetailInfoCard(
+                            title = "No AI record yet",
+                            value = "This transaction has not produced a saved AI refinement result.",
+                            supporting = "SpendWise is using the local resolver result for now."
+                        )
+                    }
+                }
+                item {
+                    DetailInfoCard(
+                        title = "Merchant context",
+                        value = transaction.merchant,
+                        supporting = transaction.rawSms
+                    )
+                }
+                if (canRequestAiRefinement) {
+                    item {
+                        TextButton(
+                            onClick = onRequestCategoryRefinement,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                Icons.Rounded.Psychology,
+                                contentDescription = null,
+                                tint = AccentPurple,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Run AI category check", color = AccentPurple, fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailInfoCard(
+    title: String,
+    value: String,
+    supporting: String
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Card(
+        colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(22.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(title, color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.Black)
+            Text(value, color = colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(supporting, color = colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private fun categoryRefinementStatusLabel(status: String, source: String): String {
+    return when {
+        source == CategoryDecisionSource.RULE -> "Rule locked"
+        status == CategoryRefinementStatus.PENDING -> "AI refining..."
+        status == CategoryRefinementStatus.RUNNING -> "AI refining..."
+        status == CategoryRefinementStatus.APPLIED -> "AI updated"
+        status == CategoryRefinementStatus.KEPT_RESOLVER -> "AI checked"
+        status == CategoryRefinementStatus.SKIPPED_STALE -> "AI skipped"
+        status == CategoryRefinementStatus.FAILED -> "AI unavailable"
+        else -> "Resolver"
+    }
+}
+
+private fun categoryRefinementStatusDescription(status: String, source: String): String {
+    return when {
+        source == CategoryDecisionSource.RULE -> "A user rule set this category, so AI was intentionally skipped."
+        status == CategoryRefinementStatus.PENDING || status == CategoryRefinementStatus.RUNNING ->
+            "SpendWise saved the transaction immediately and is refining the category in the background."
+        status == CategoryRefinementStatus.APPLIED ->
+            "AI confidently replaced the resolver category."
+        status == CategoryRefinementStatus.KEPT_RESOLVER ->
+            "AI reviewed the transaction and kept SpendWise's original category."
+        status == CategoryRefinementStatus.SKIPPED_STALE ->
+            "AI finished after the transaction changed, so SpendWise ignored the old result."
+        status == CategoryRefinementStatus.FAILED ->
+            "The AI pass did not return a usable category, so SpendWise kept the existing one."
+        else -> "This transaction is currently using the local keyword resolver."
+    }
+}
+
+private fun decisionSourceLabel(source: String): String {
+    return when (source) {
+        CategoryDecisionSource.RULE -> "Rule"
+        CategoryDecisionSource.AI -> "AI"
+        CategoryDecisionSource.USER_EDIT -> "User"
+        else -> "Resolver"
     }
 }
 
@@ -4283,29 +4673,11 @@ private fun availableCategories(
     transactions: List<TransactionEntity>,
     currentCategory: String? = null
 ): List<String> {
-    val defaults = listOf(
-        "UPI",
-        "Food",
-        "Shopping",
-        "Entertainment",
-        "Bills",
-        "Loans & EMI",
-        "Travel",
-        "Gifts & Rewards",
-        "Income",
-        "Salary",
-        "Refunds",
-        "Cash Withdrawal",
-        "Other"
+    return CategoryCatalog.allCategories(
+        customCategories = customCategories,
+        transactionCategories = transactions.map { it.category },
+        currentCategory = currentCategory
     )
-    return (defaults +
-        customCategories.map { it.name } +
-        transactions.map { it.category } +
-        listOfNotNull(currentCategory))
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-        .distinctBy { it.lowercase(Locale.ENGLISH) }
-        .sortedBy { it.lowercase(Locale.ENGLISH) }
 }
 
 private fun buildRuleSummary(rule: TransactionRule): String {

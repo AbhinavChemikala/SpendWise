@@ -10,14 +10,15 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [TransactionEntity::class, PendingSmsEntity::class, SmsReviewEntity::class],
-    version = 5,
+    entities = [TransactionEntity::class, PendingSmsEntity::class, SmsReviewEntity::class, TransactionCategoryAiEntity::class],
+    version = 6,
     exportSchema = true
 )
 @TypeConverters(AppDatabase.Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun transactionDao(): TransactionDao
+    abstract fun transactionCategoryAiDao(): TransactionCategoryAiDao
     abstract fun pendingSmsDao(): PendingSmsDao
     abstract fun smsReviewDao(): SmsReviewDao
 
@@ -96,6 +97,50 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE transactions ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0"
+                )
+                database.execSQL(
+                    "ALTER TABLE transactions ADD COLUMN categoryDecisionSource TEXT NOT NULL DEFAULT 'RESOLVER'"
+                )
+                database.execSQL(
+                    "ALTER TABLE transactions ADD COLUMN categoryRefinementStatus TEXT NOT NULL DEFAULT 'NONE'"
+                )
+                database.execSQL(
+                    "ALTER TABLE transactions ADD COLUMN categoryRuleName TEXT NOT NULL DEFAULT ''"
+                )
+                database.execSQL(
+                    "UPDATE transactions SET updatedAt = timestamp WHERE updatedAt = 0"
+                )
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS transaction_category_ai (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        transactionId INTEGER NOT NULL,
+                        resolverCategory TEXT NOT NULL,
+                        resolverSignalsJson TEXT NOT NULL,
+                        currentCategory TEXT NOT NULL,
+                        suggestedCategory TEXT NOT NULL,
+                        confidence REAL NOT NULL,
+                        reason TEXT NOT NULL,
+                        model TEXT NOT NULL,
+                        rawJson TEXT NOT NULL,
+                        outcome TEXT NOT NULL,
+                        outcomeDetail TEXT NOT NULL,
+                        startedAt INTEGER NOT NULL,
+                        finishedAt INTEGER NOT NULL,
+                        keepCurrent INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_transaction_category_ai_transactionId ON transaction_category_ai(transactionId)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -103,7 +148,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "spendwise.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                     .also { INSTANCE = it }
             }

@@ -33,5 +33,9 @@ data class TransactionEntity(
     val aiReason: String = "",
     val paymentMode: String = "Other",
     val accountLabel: String = "",   // e.g. "HDFC Credit ••4521" or "PhonePe UPI"
-    val isIgnoredDuplicate: Boolean = false
+    val isIgnoredDuplicate: Boolean = false,
+    val updatedAt: Long = 0L,
+    val categoryDecisionSource: String = "RESOLVER",
+    val categoryRefinementStatus: String = "NONE",
+    val categoryRuleName: String = ""
 )

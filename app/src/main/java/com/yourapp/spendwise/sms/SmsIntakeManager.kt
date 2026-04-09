@@ -1,6 +1,7 @@
 package com.yourapp.spendwise.sms
 
 import android.content.Context
+import com.yourapp.spendwise.background.TransactionCategoryRefinementWorker
 import com.yourapp.spendwise.data.TransactionFactory
 import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.PendingSmsEntity
@@ -72,6 +73,7 @@ object SmsIntakeManager {
                 )
                 val insertedId = transactionDao.insert(transaction)
                 if (insertedId != -1L) {
+                    TransactionCategoryRefinementWorker.enqueue(appContext, insertedId)
                     WidgetUpdater.updateAll(appContext)
                     reviewDao.insert(
                         SmsReviewEntity(
@@ -123,6 +125,7 @@ object SmsIntakeManager {
                     )
                     val insertedId = transactionDao.insert(transaction)
                     if (insertedId != -1L) {
+                        TransactionCategoryRefinementWorker.enqueue(appContext, insertedId)
                         WidgetUpdater.updateAll(appContext)
                         reviewDao.insert(
                             SmsReviewEntity(
