@@ -41,7 +41,7 @@ class SettingsStore(context: Context) {
         prefs.edit().putString(KEY_CLOUD_AI_API_KEY, key.trim()).apply()
     }
 
-    /** "light", "dark", or "system" */
+    /** "system", "light", or one of the dark theme mode strings. */
     fun getThemeMode(): String = prefs.getString(KEY_THEME_MODE, "system").orEmpty().ifBlank { "system" }
 
     fun setThemeMode(mode: String) {

@@ -15,9 +15,12 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.yourapp.spendwise.sms.GeminiNanoAnalyzer
 import com.yourapp.spendwise.sms.SpendWiseNotificationManager
+import com.yourapp.spendwise.ui.DarkThemeModes
 import com.yourapp.spendwise.ui.DashboardScreen
 import com.yourapp.spendwise.ui.MainViewModel
 import com.yourapp.spendwise.ui.SpendWiseTheme
+import com.yourapp.spendwise.ui.THEME_MODE_LIGHT
+import com.yourapp.spendwise.ui.normalizeThemeMode
 import com.yourapp.spendwise.background.DailyReminderScheduler
 import android.content.Intent
 
@@ -45,12 +48,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             val systemDark = isSystemInDarkTheme()
-            val isDark = when (uiState.themeMode) {
-                "dark"  -> true
-                "light" -> false
-                else    -> systemDark   // "system"
+            val themeMode = normalizeThemeMode(uiState.themeMode)
+            val isDark = when {
+                themeMode in DarkThemeModes -> true
+                themeMode == THEME_MODE_LIGHT -> false
+                else -> systemDark
             }
-            SpendWiseTheme(isDark = isDark) {
+            SpendWiseTheme(isDark = isDark, themeMode = themeMode) {
                 DashboardScreen()
             }
         }

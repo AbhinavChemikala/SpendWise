@@ -84,7 +84,7 @@ data class DashboardUiState(
     val isAiReviewEnabled: Boolean = true,
     val isCloudAiEnabled: Boolean = false,
     val cloudAiApiKey: String = "",
-    val themeMode: String = "system",  // "system", "light", "dark"
+    val themeMode: String = THEME_MODE_SYSTEM,
     val dailyReminderEnabled: Boolean = true,
     val dailyReminderHour: Int = 22,
     val dailyReminderMinute: Int = 0,
@@ -117,7 +117,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isAiReviewEnabled = repository.isAiReviewEnabled(),
             isCloudAiEnabled = repository.isCloudAiEnabled(),
             cloudAiApiKey = repository.getCloudAiApiKey(),
-            themeMode = repository.getThemeMode(),
+            themeMode = normalizeThemeMode(repository.getThemeMode()),
             dailyReminderEnabled = repository.isDailyReminderEnabled(),
             dailyReminderHour = repository.getDailyReminderHour(),
             dailyReminderMinute = repository.getDailyReminderMinute(),
@@ -256,8 +256,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setThemeMode(mode: String) {
-        repository.setThemeMode(mode)
-        _uiState.update { it.copy(themeMode = mode) }
+        val normalizedMode = normalizeThemeMode(mode)
+        repository.setThemeMode(normalizedMode)
+        _uiState.update { it.copy(themeMode = normalizedMode) }
     }
 
     fun toggleDailyReminder(enabled: Boolean) {

@@ -977,6 +977,7 @@ private fun InsightsScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsScreen(
     modifier: Modifier,
@@ -1006,6 +1007,16 @@ private fun SettingsScreen(
     var showSpamInbox by rememberSaveable { mutableStateOf(false) }
     var showDebugConsole by rememberSaveable { mutableStateOf(false) }
     var showSourceExplorer by rememberSaveable { mutableStateOf(false) }
+    val baseThemeOptions = listOf(
+        THEME_MODE_SYSTEM to "System",
+        THEME_MODE_LIGHT to "Light"
+    )
+    val darkThemeOptions = listOf(
+        THEME_MODE_DARK to "Default dark",
+        THEME_MODE_DARK_AMOLED to "AMOLED",
+        THEME_MODE_DARK_OCEAN to "Ocean",
+        THEME_MODE_DARK_FOREST to "Forest"
+    )
 
     if (showCategoryDialog) {
         CategoryEditorDialog(
@@ -1081,16 +1092,39 @@ private fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text("App Theme", fontWeight = FontWeight.SemiBold)
-                    Row(
+                    Text(
+                        "Mode",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf("system" to "📱 System", "light" to "☀️ Light", "dark" to "🌙 Dark").forEach { (mode, label) ->
+                        baseThemeOptions.forEach { (mode, label) ->
                             FilterChip(
                                 selected = uiState.themeMode == mode,
                                 onClick = { onSetThemeMode(mode) },
-                                label = { Text(label) },
-                                modifier = Modifier.weight(1f)
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                    Text(
+                        "Dark themes",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        darkThemeOptions.forEach { (mode, label) ->
+                            FilterChip(
+                                selected = uiState.themeMode == mode,
+                                onClick = { onSetThemeMode(mode) },
+                                label = { Text(label) }
                             )
                         }
                     }
@@ -1332,7 +1366,7 @@ private fun SpendWiseBottomBar(
     selectedTab: SpendWiseTab,
     onSelected: (SpendWiseTab) -> Unit
 ) {
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) {
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         listOf(
             SpendWiseTab.HOME to Pair("Home", Icons.Rounded.Home),
             SpendWiseTab.ACTIVITY to Pair("Activity", Icons.AutoMirrored.Rounded.ReceiptLong),
