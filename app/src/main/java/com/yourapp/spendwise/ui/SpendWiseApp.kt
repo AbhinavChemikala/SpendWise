@@ -37,6 +37,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -116,6 +118,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -175,6 +178,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.absoluteValue
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 internal val AccentPink = Color(0xFFFF577A)
 internal val AccentTeal = Color(0xFF24B6D3)
@@ -233,6 +237,14 @@ private val HomeCardLabels = mapOf(
     HomeCardId.CASHFLOW to "Cashflow",
     HomeCardId.INSIGHTS_PREVIEW to "Insights",
     HomeCardId.RECENT_TRANSACTIONS to "Recent Transactions"
+)
+
+private val MainTabOrder = listOf(
+    SpendWiseTab.HOME,
+    SpendWiseTab.ACTIVITY,
+    SpendWiseTab.REVIEW_CENTER,
+    SpendWiseTab.INSIGHTS,
+    SpendWiseTab.SETTINGS
 )
 
 private val AdvancedFilterStateSaver: Saver<AdvancedFilterState, Any> = listSaver(
@@ -431,6 +443,28 @@ fun SpendWiseApp(vm: MainViewModel) {
         )
     }
 
+    val selectedPage = MainTabOrder.indexOf(uiState.selectedTab).takeIf { it >= 0 } ?: 0
+    val pagerState = rememberPagerState(
+        initialPage = selectedPage,
+        pageCount = { MainTabOrder.size }
+    )
+
+    LaunchedEffect(selectedPage) {
+        if (pagerState.currentPage != selectedPage) {
+            pagerState.animateScrollToPage(selectedPage)
+        }
+    }
+
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }
+            .distinctUntilChanged()
+            .collect { page ->
+                MainTabOrder.getOrNull(page)?.let { tab ->
+                    vm.selectTab(tab)
+                }
+            }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -450,134 +484,140 @@ fun SpendWiseApp(vm: MainViewModel) {
             )
         }
     ) { innerPadding ->
-        when (uiState.selectedTab) {
-            SpendWiseTab.HOME -> HomeScreen(
-                modifier = Modifier.padding(innerPadding),
-                uiState = uiState,
-                onDeleteTransaction = { transactionPendingDelete = it },
-                onOpenTransaction = {
-                    selectedTransaction = it
-                    transactionDialogMode = TransactionDialogMode.VIEW
-                },
-                onEditTransaction = {
-                    selectedTransaction = it
-                    transactionDialogMode = TransactionDialogMode.EDIT
-                },
-                onRemoveDuplicateRequest = vm::ignoreDuplicate,
-                onSelectSummaryRange = vm::selectSummaryRange,
-                onOpenInsights = { vm.selectTab(SpendWiseTab.INSIGHTS) },
-                onOpenActivity = { vm.selectTab(SpendWiseTab.ACTIVITY) },
-                onMonthClick = { showMonthPicker = true },
-                onUpdateHomeCardOrder = vm::updateHomeCardOrder,
-                onToggleHomeCardVisibility = vm::toggleHomeCardVisibility
-            )
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            beyondViewportPageCount = 1
+        ) { page ->
+            when (MainTabOrder[page]) {
+                SpendWiseTab.HOME -> HomeScreen(
+                    modifier = Modifier.padding(innerPadding),
+                    uiState = uiState,
+                    onDeleteTransaction = { transactionPendingDelete = it },
+                    onOpenTransaction = {
+                        selectedTransaction = it
+                        transactionDialogMode = TransactionDialogMode.VIEW
+                    },
+                    onEditTransaction = {
+                        selectedTransaction = it
+                        transactionDialogMode = TransactionDialogMode.EDIT
+                    },
+                    onRemoveDuplicateRequest = vm::ignoreDuplicate,
+                    onSelectSummaryRange = vm::selectSummaryRange,
+                    onOpenInsights = { vm.selectTab(SpendWiseTab.INSIGHTS) },
+                    onOpenActivity = { vm.selectTab(SpendWiseTab.ACTIVITY) },
+                    onMonthClick = { showMonthPicker = true },
+                    onUpdateHomeCardOrder = vm::updateHomeCardOrder,
+                    onToggleHomeCardVisibility = vm::toggleHomeCardVisibility
+                )
 
-            SpendWiseTab.ACTIVITY -> ActivityScreen(
-                modifier = Modifier.padding(innerPadding),
-                uiState = uiState,
-                onDeleteTransaction = { transactionPendingDelete = it },
-                onOpenTransaction = {
-                    selectedTransaction = it
-                    transactionDialogMode = TransactionDialogMode.VIEW
-                },
-                onEditTransaction = {
-                    selectedTransaction = it
-                    transactionDialogMode = TransactionDialogMode.EDIT
-                },
-                onRemoveDuplicateRequest = vm::ignoreDuplicate,
-                onMonthClick = { showMonthPicker = true }
-            )
+                SpendWiseTab.ACTIVITY -> ActivityScreen(
+                    modifier = Modifier.padding(innerPadding),
+                    uiState = uiState,
+                    onDeleteTransaction = { transactionPendingDelete = it },
+                    onOpenTransaction = {
+                        selectedTransaction = it
+                        transactionDialogMode = TransactionDialogMode.VIEW
+                    },
+                    onEditTransaction = {
+                        selectedTransaction = it
+                        transactionDialogMode = TransactionDialogMode.EDIT
+                    },
+                    onRemoveDuplicateRequest = vm::ignoreDuplicate,
+                    onMonthClick = { showMonthPicker = true }
+                )
 
-            SpendWiseTab.INSIGHTS -> InsightsScreen(
-                modifier = Modifier.padding(innerPadding),
-                uiState = uiState,
-                onSelectSummaryRange = vm::selectSummaryRange,
-                onMonthClick = { showMonthPicker = true }
-            )
+                SpendWiseTab.INSIGHTS -> InsightsScreen(
+                    modifier = Modifier.padding(innerPadding),
+                    uiState = uiState,
+                    onSelectSummaryRange = vm::selectSummaryRange,
+                    onMonthClick = { showMonthPicker = true }
+                )
 
-            SpendWiseTab.REVIEW_CENTER -> AiReviewScreen(
-                modifier = Modifier.padding(innerPadding),
-                uiState = uiState,
-                onRetryItem = vm::retryAiReview,
-                onRetryAllFailed = vm::retryAllFailedAiReviews
-            )
+                SpendWiseTab.REVIEW_CENTER -> AiReviewScreen(
+                    modifier = Modifier.padding(innerPadding),
+                    uiState = uiState,
+                    onRetryItem = vm::retryAiReview,
+                    onRetryAllFailed = vm::retryAllFailedAiReviews
+                )
 
-            SpendWiseTab.SETTINGS -> SettingsScreen(
-                modifier = Modifier.padding(innerPadding),
-                uiState = uiState,
-                onScanExistingSms = {
-                    if (ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.READ_SMS
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        context.findActivity()?.let { activity ->
-                            ActivityCompat.requestPermissions(
-                                activity,
-                                arrayOf(Manifest.permission.READ_SMS),
-                                103
-                            )
+                SpendWiseTab.SETTINGS -> SettingsScreen(
+                    modifier = Modifier.padding(innerPadding),
+                    uiState = uiState,
+                    onScanExistingSms = {
+                        if (ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.READ_SMS
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            context.findActivity()?.let { activity ->
+                                ActivityCompat.requestPermissions(
+                                    activity,
+                                    arrayOf(Manifest.permission.READ_SMS),
+                                    103
+                                )
+                            }
+                        } else {
+                            vm.importExistingSms()
                         }
-                    } else {
-                        vm.importExistingSms()
-                    }
-                },
-                onAddCategory = vm::addCustomCategory,
-                onRemoveCategory = vm::removeCustomCategory,
-                onSaveRule = vm::saveRule,
-                onDeleteRule = vm::deleteRule,
-                onSaveBudget = vm::saveBudgetGoal,
-                onDeleteBudget = vm::deleteBudgetGoal,
-                onToggleDebug = vm::toggleDebugMode,
-                onToggleAiReview = vm::toggleAiReview,
-                onToggleCloudAi = vm::toggleCloudAi,
-                onUpdateCloudAiApiKey = vm::updateCloudAiApiKey,
-                onConnectAxisEmail = {
-                    val client = GmailAxisSyncManager.buildSignInClient(context)
-                    client.signOut().addOnCompleteListener {
-                        gmailConnectLauncher.launch(client.signInIntent)
-                    }
-                },
-                onDisconnectAxisEmail = {
-                    GmailAxisSyncManager.buildSignInClient(context).signOut()
-                    vm.disconnectAxisEmailAccount()
-                },
-                onToggleAxisEmailAutoSync = vm::toggleAxisEmailAutoSync,
-                onSyncAxisEmails = { vm.syncAxisEmailsNow(trigger = AxisEmailSyncTrigger.MANUAL) },
-                onToggleSparkMailTrigger = vm::toggleSparkMailTrigger,
-                onOpenSparkNotificationAccess = {
-                    vm.refreshNotificationAccessState()
-                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                },
-                onRecoverLegacyAiFailures = vm::recoverLegacyAiFailures,
-                onSetThemeMode = vm::setThemeMode,
-                onToggleDailyReminder = vm::toggleDailyReminder,
-                onSetDailyReminderTime = vm::setDailyReminderTime,
-                onPhoneChange = vm::updateDebugPhoneNumber,
-                onSimulateTemplate = { template ->
-                    vm.simulateIncomingSms(template.sender, template.body, template.title)
-                },
-                onSendTemplate = { template ->
-                    val phone = uiState.debugPhoneNumber.trim()
-                    if (phone.isBlank()) {
-                        vm.setDebugStatus("Add a phone number before sending a real SMS.")
-                    } else if (ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.SEND_SMS
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        context.findActivity()?.let { activity ->
-                            ActivityCompat.requestPermissions(
-                                activity,
-                                arrayOf(Manifest.permission.SEND_SMS),
-                                102
-                            )
+                    },
+                    onAddCategory = vm::addCustomCategory,
+                    onRemoveCategory = vm::removeCustomCategory,
+                    onSaveRule = vm::saveRule,
+                    onDeleteRule = vm::deleteRule,
+                    onSaveBudget = vm::saveBudgetGoal,
+                    onDeleteBudget = vm::deleteBudgetGoal,
+                    onToggleDebug = vm::toggleDebugMode,
+                    onToggleAiReview = vm::toggleAiReview,
+                    onToggleCloudAi = vm::toggleCloudAi,
+                    onUpdateCloudAiApiKey = vm::updateCloudAiApiKey,
+                    onConnectAxisEmail = {
+                        val client = GmailAxisSyncManager.buildSignInClient(context)
+                        client.signOut().addOnCompleteListener {
+                            gmailConnectLauncher.launch(client.signInIntent)
                         }
-                    } else {
-                        vm.sendDebugSms(phone, template.body, template.title)
+                    },
+                    onDisconnectAxisEmail = {
+                        GmailAxisSyncManager.buildSignInClient(context).signOut()
+                        vm.disconnectAxisEmailAccount()
+                    },
+                    onToggleAxisEmailAutoSync = vm::toggleAxisEmailAutoSync,
+                    onSyncAxisEmails = { vm.syncAxisEmailsNow(trigger = AxisEmailSyncTrigger.MANUAL) },
+                    onToggleSparkMailTrigger = vm::toggleSparkMailTrigger,
+                    onOpenSparkNotificationAccess = {
+                        vm.refreshNotificationAccessState()
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    },
+                    onRecoverLegacyAiFailures = vm::recoverLegacyAiFailures,
+                    onSetThemeMode = vm::setThemeMode,
+                    onToggleDailyReminder = vm::toggleDailyReminder,
+                    onSetDailyReminderTime = vm::setDailyReminderTime,
+                    onPhoneChange = vm::updateDebugPhoneNumber,
+                    onSimulateTemplate = { template ->
+                        vm.simulateIncomingSms(template.sender, template.body, template.title)
+                    },
+                    onSendTemplate = { template ->
+                        val phone = uiState.debugPhoneNumber.trim()
+                        if (phone.isBlank()) {
+                            vm.setDebugStatus("Add a phone number before sending a real SMS.")
+                        } else if (ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.SEND_SMS
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            context.findActivity()?.let { activity ->
+                                ActivityCompat.requestPermissions(
+                                    activity,
+                                    arrayOf(Manifest.permission.SEND_SMS),
+                                    102
+                                )
+                            }
+                        } else {
+                            vm.sendDebugSms(phone, template.body, template.title)
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     }
 }
