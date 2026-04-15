@@ -26,6 +26,9 @@ interface TransactionDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(transaction: TransactionEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(transactions: List<TransactionEntity>): List<Long>
+
     @Update
     suspend fun update(transaction: TransactionEntity): Int
 
@@ -34,6 +37,9 @@ interface TransactionDao {
 
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteById(id: Long): Int
+
+    @Query("DELETE FROM transactions")
+    suspend fun deleteAll(): Int
 
     @Query("UPDATE transactions SET isIgnoredDuplicate = 1 WHERE id = :id")
     suspend fun ignoreDuplicate(id: Long): Int

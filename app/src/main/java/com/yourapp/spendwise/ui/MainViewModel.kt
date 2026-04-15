@@ -1,8 +1,10 @@
 package com.yourapp.spendwise.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.yourapp.spendwise.backup.BackupHistoryEntry
 import com.yourapp.spendwise.data.CustomCategory
 import com.yourapp.spendwise.data.InsightFact
 import com.yourapp.spendwise.data.DuplicateInsight
@@ -98,6 +100,12 @@ data class DashboardUiState(
     val dailyReminderEnabled: Boolean = true,
     val dailyReminderHour: Int = 22,
     val dailyReminderMinute: Int = 0,
+    val driveBackupAccount: String = "",
+    val driveBackupAutoEnabled: Boolean = false,
+    val driveBackupHour: Int = 2,
+    val driveBackupMinute: Int = 0,
+    val backupHistory: List<BackupHistoryEntry> = emptyList(),
+    val isBackupBusy: Boolean = false,
     val homeCardOrder: List<String> = emptyList(),
     val homeHiddenCardIds: Set<String> = emptySet(),
     val debugPhoneNumber: String = "",
@@ -140,6 +148,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dailyReminderEnabled = repository.isDailyReminderEnabled(),
             dailyReminderHour = repository.getDailyReminderHour(),
             dailyReminderMinute = repository.getDailyReminderMinute(),
+            driveBackupAccount = repository.getDriveBackupAccount(),
+            driveBackupAutoEnabled = repository.isDriveBackupAutoEnabled(),
+            driveBackupHour = repository.getDriveBackupHour(),
+            driveBackupMinute = repository.getDriveBackupMinute(),
+            backupHistory = repository.getBackupHistory(),
             homeCardOrder = repository.getHomeCardOrder(),
             homeHiddenCardIds = repository.getHiddenHomeCardIds(),
             debugPhoneNumber = repository.getDebugPhoneNumber()
@@ -154,6 +167,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         repository.ensureAxisEmailSyncSchedule()
+        repository.ensureDriveBackupSchedule()
         loadCustomizations()
         loadCurrentMonth()
         checkPendingCount()
@@ -413,6 +427,126 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 debugStatusMessage = "Daily reminder time updated."
             )
         }
+    }
+
+    fun connectDriveBackupAccount(email: String) {
+        if (email.isBlank()) {
+            _uiState.update { it.copy(debugStatusMessage = "Unable to read the selected Google account.") }
+            return
+        }
+        repository.connectDriveBackupAccount(email)
+        _uiState.update {
+            it.copy(
+                driveBackupAccount = repository.getDriveBackupAccount(),
+                driveBackupAutoEnabled = repository.isDriveBackupAutoEnabled(),
+                backupHistory = repository.getBackupHistory(),
+                debugStatusMessage = "Connected Google Drive backup."
+            )
+        }
+    }
+
+    fun disconnectDriveBackupAccount() {
+        repository.disconnectDriveBackupAccount()
+        _uiState.update {
+            it.copy(
+                driveBackupAccount = "",
+                driveBackupAutoEnabled = false,
+                backupHistory = repository.getBackupHistory(),
+                debugStatusMessage = "Disconnected Google Drive backup."
+            )
+        }
+    }
+
+    fun toggleDriveBackupAuto(enabled: Boolean) {
+        repository.setDriveBackupAutoEnabled(enabled)
+        _uiState.update {
+            it.copy(
+                driveBackupAutoEnabled = repository.isDriveBackupAutoEnabled(),
+                backupHistory = repository.getBackupHistory(),
+                debugStatusMessage = if (enabled) {
+                    "Daily Drive backup enabled."
+                } else {
+                    "Daily Drive backup paused."
+                }
+            )
+        }
+    }
+
+    fun setDriveBackupTime(hour: Int, minute: Int) {
+        repository.setDriveBackupTime(hour, minute)
+        _uiState.update {
+            it.copy(
+                driveBackupHour = repository.getDriveBackupHour(),
+                driveBackupMinute = repository.getDriveBackupMinute(),
+                debugStatusMessage = "Drive backup time updated."
+            )
+        }
+    }
+
+    fun exportBackupToUri(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isBackupBusy = true) }
+            val result = runCatching { repository.exportBackupToUri(uri) }
+            _uiState.update {
+                it.copy(
+                    isBackupBusy = false,
+                    backupHistory = repository.getBackupHistory(),
+                    debugStatusMessage = result.getOrNull()?.message
+                        ?: result.exceptionOrNull()?.message
+                        ?: "Unable to export backup."
+                )
+            }
+        }
+    }
+
+    fun restoreBackupFromUri(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isBackupBusy = true) }
+            val result = runCatching { repository.restoreBackupFromUri(uri) }
+            refreshAfterBackupRestore()
+            _uiState.update {
+                it.copy(
+                    isBackupBusy = false,
+                    backupHistory = repository.getBackupHistory(),
+                    debugStatusMessage = result.getOrNull()?.message
+                        ?: result.exceptionOrNull()?.message
+                        ?: "Unable to restore backup."
+                )
+            }
+        }
+    }
+
+    fun pushBackupToDrive() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isBackupBusy = true) }
+            val result = repository.pushBackupToDrive()
+            _uiState.update {
+                it.copy(
+                    isBackupBusy = false,
+                    backupHistory = repository.getBackupHistory(),
+                    debugStatusMessage = result.message
+                )
+            }
+        }
+    }
+
+    fun restoreBackupFromDrive() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isBackupBusy = true) }
+            val result = repository.restoreBackupFromDrive()
+            refreshAfterBackupRestore()
+            _uiState.update {
+                it.copy(
+                    isBackupBusy = false,
+                    backupHistory = repository.getBackupHistory(),
+                    debugStatusMessage = result.message
+                )
+            }
+        }
+    }
+
+    fun refreshBackupHistory() {
+        _uiState.update { it.copy(backupHistory = repository.getBackupHistory()) }
     }
 
     fun updateHomeCardOrder(order: List<String>) {
@@ -903,10 +1037,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 customCategories = repository.getCustomCategories(),
                 transactionRules = repository.getRules(),
                 budgetGoals = repository.getBudgetGoals(),
+                themeMode = normalizeThemeMode(repository.getThemeMode()),
+                dailyReminderEnabled = repository.isDailyReminderEnabled(),
+                dailyReminderHour = repository.getDailyReminderHour(),
+                dailyReminderMinute = repository.getDailyReminderMinute(),
+                driveBackupAccount = repository.getDriveBackupAccount(),
+                driveBackupAutoEnabled = repository.isDriveBackupAutoEnabled(),
+                driveBackupHour = repository.getDriveBackupHour(),
+                driveBackupMinute = repository.getDriveBackupMinute(),
+                backupHistory = repository.getBackupHistory(),
+                axisEmailAccount = repository.getAxisEmailAccount(),
+                axisEmailAutoSyncEnabled = repository.isAxisEmailAutoSyncEnabled(),
+                sparkMailTriggerEnabled = repository.isSparkMailTriggerEnabled(),
+                debugModeEnabled = repository.isDebugModeEnabled(),
+                isAiReviewEnabled = repository.isAiReviewEnabled(),
+                isCloudAiEnabled = repository.isCloudAiEnabled(),
                 homeCardOrder = repository.getHomeCardOrder(),
                 homeHiddenCardIds = repository.getHiddenHomeCardIds()
             )
         }
+    }
+
+    private fun refreshAfterBackupRestore() {
+        loadCustomizations()
+        loadCurrentMonth()
+        checkPendingCount()
+        refreshAxisEmailSyncHistory()
+        refreshNotificationAccessState()
     }
 
     private fun observeReviewStreams() {

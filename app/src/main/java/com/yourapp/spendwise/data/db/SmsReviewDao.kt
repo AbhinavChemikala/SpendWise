@@ -11,6 +11,9 @@ interface SmsReviewDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(event: SmsReviewEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(events: List<SmsReviewEntity>): List<Long>
+
     @Query(
         """
         UPDATE sms_review_events
@@ -47,6 +50,12 @@ interface SmsReviewDao {
 
     @Query("SELECT * FROM sms_review_events WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): SmsReviewEntity?
+
+    @Query("SELECT * FROM sms_review_events ORDER BY id ASC")
+    suspend fun getAll(): List<SmsReviewEntity>
+
+    @Query("DELETE FROM sms_review_events")
+    suspend fun deleteAll(): Int
 
     @Query("SELECT * FROM sms_review_events WHERE finalStatus = :status ORDER BY receivedAt DESC")
     suspend fun getByStatus(status: String): List<SmsReviewEntity>

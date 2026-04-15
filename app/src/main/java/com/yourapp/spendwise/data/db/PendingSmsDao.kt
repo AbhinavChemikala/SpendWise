@@ -10,6 +10,9 @@ interface PendingSmsDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(pendingSms: PendingSmsEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(pendingSms: List<PendingSmsEntity>): List<Long>
+
     @Query(
         """
         SELECT EXISTS(
@@ -31,6 +34,9 @@ interface PendingSmsDao {
 
     @Query("DELETE FROM pending_sms WHERE id = :id")
     suspend fun deleteById(id: Long): Int
+
+    @Query("DELETE FROM pending_sms")
+    suspend fun deleteAll(): Int
 
     @Query("SELECT COUNT(*) FROM pending_sms")
     suspend fun getPendingCount(): Int

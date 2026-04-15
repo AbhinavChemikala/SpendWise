@@ -11,6 +11,7 @@ class DailyReminderRescheduleReceiver : BroadcastReceiver() {
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED -> {
                 DailyReminderScheduler.scheduleNext(context.applicationContext)
+                BackupScheduler.scheduleNext(context.applicationContext)
             }
         }
     }

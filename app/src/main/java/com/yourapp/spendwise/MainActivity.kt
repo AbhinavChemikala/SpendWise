@@ -21,6 +21,7 @@ import com.yourapp.spendwise.ui.MainViewModel
 import com.yourapp.spendwise.ui.SpendWiseTheme
 import com.yourapp.spendwise.ui.THEME_MODE_LIGHT
 import com.yourapp.spendwise.ui.normalizeThemeMode
+import com.yourapp.spendwise.background.BackupScheduler
 import com.yourapp.spendwise.background.DailyReminderScheduler
 import android.content.Intent
 
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
         requestSmsPermissions()
         SpendWiseNotificationManager.ensureChannel(this)
         DailyReminderScheduler.scheduleNext(this)
+        BackupScheduler.scheduleNext(this)
 
         GeminiNanoAnalyzer.ensureModelReady(
             onReady = {

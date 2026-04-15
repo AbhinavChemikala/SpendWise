@@ -1,9 +1,15 @@
 package com.yourapp.spendwise.data
 
 import android.content.Context
+import android.net.Uri
 import android.provider.Telephony
 import android.telephony.SmsManager
 import com.google.gson.Gson
+import com.yourapp.spendwise.backup.BackupHistoryEntry
+import com.yourapp.spendwise.backup.BackupResult
+import com.yourapp.spendwise.backup.BackupTrigger
+import com.yourapp.spendwise.backup.SpendWiseBackupManager
+import com.yourapp.spendwise.background.BackupScheduler
 import com.yourapp.spendwise.background.DailyReminderScheduler
 import com.yourapp.spendwise.background.TransactionCategoryRefinementWorker
 import com.yourapp.spendwise.data.db.AppDatabase
@@ -173,6 +179,7 @@ class TransactionRepository(context: Context) {
     private val reviewDao = database.smsReviewDao()
     private val smsProcessor = SmsProcessor(appContext)
     private val settingsStore = SettingsStore(appContext)
+    private val backupManager = SpendWiseBackupManager(appContext)
     private val gson = Gson()
 
     fun getTransactionsForMonth(year: Int, month: Int): Flow<List<TransactionEntity>> {
@@ -760,6 +767,49 @@ class TransactionRepository(context: Context) {
         settingsStore.setDailyReminderTime(hour, minute)
         DailyReminderScheduler.scheduleNext(appContext)
     }
+
+    fun getDriveBackupAccount(): String = settingsStore.getDriveBackupAccount()
+
+    fun connectDriveBackupAccount(email: String) {
+        settingsStore.setDriveBackupAccount(email)
+        BackupScheduler.scheduleNext(appContext)
+    }
+
+    fun disconnectDriveBackupAccount() {
+        settingsStore.clearDriveBackupAccount()
+        BackupScheduler.cancel(appContext)
+    }
+
+    fun isDriveBackupAutoEnabled(): Boolean = settingsStore.isDriveBackupAutoEnabled()
+
+    fun setDriveBackupAutoEnabled(enabled: Boolean) {
+        settingsStore.setDriveBackupAutoEnabled(enabled)
+        BackupScheduler.scheduleNext(appContext)
+    }
+
+    fun getDriveBackupHour(): Int = settingsStore.getDriveBackupHour()
+
+    fun getDriveBackupMinute(): Int = settingsStore.getDriveBackupMinute()
+
+    fun setDriveBackupTime(hour: Int, minute: Int) {
+        settingsStore.setDriveBackupTime(hour, minute)
+        BackupScheduler.scheduleNext(appContext)
+    }
+
+    fun getBackupHistory(): List<BackupHistoryEntry> = settingsStore.getBackupHistory()
+
+    fun ensureDriveBackupSchedule() {
+        BackupScheduler.scheduleNext(appContext)
+    }
+
+    suspend fun exportBackupToUri(uri: Uri): BackupResult = backupManager.exportToUri(uri)
+
+    suspend fun restoreBackupFromUri(uri: Uri): BackupResult = backupManager.restoreFromUri(uri)
+
+    suspend fun pushBackupToDrive(trigger: String = BackupTrigger.MANUAL): BackupResult =
+        backupManager.pushToDrive(trigger)
+
+    suspend fun restoreBackupFromDrive(): BackupResult = backupManager.restoreLatestFromDrive()
 
     fun getHomeCardOrder(): List<String> = settingsStore.getHomeCardOrder()
 

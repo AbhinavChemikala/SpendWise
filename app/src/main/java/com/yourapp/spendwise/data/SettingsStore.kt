@@ -3,6 +3,8 @@ package com.yourapp.spendwise.data
 import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.yourapp.spendwise.backup.BackupHistoryEntry
+import com.yourapp.spendwise.backup.BackupSettings
 import com.yourapp.spendwise.mail.AxisEmailSyncHistoryEntry
 
 class SettingsStore(context: Context) {
@@ -138,6 +140,50 @@ class SettingsStore(context: Context) {
             .apply()
     }
 
+    fun getDriveBackupAccount(): String = prefs.getString(KEY_DRIVE_BACKUP_ACCOUNT, "").orEmpty()
+
+    fun setDriveBackupAccount(email: String) {
+        prefs.edit().putString(KEY_DRIVE_BACKUP_ACCOUNT, email.trim()).apply()
+    }
+
+    fun clearDriveBackupAccount() {
+        prefs.edit()
+            .remove(KEY_DRIVE_BACKUP_ACCOUNT)
+            .putBoolean(KEY_DRIVE_BACKUP_AUTO_ENABLED, false)
+            .apply()
+    }
+
+    fun isDriveBackupAutoEnabled(): Boolean = prefs.getBoolean(KEY_DRIVE_BACKUP_AUTO_ENABLED, false)
+
+    fun setDriveBackupAutoEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DRIVE_BACKUP_AUTO_ENABLED, enabled).apply()
+    }
+
+    fun getDriveBackupHour(): Int = prefs.getInt(KEY_DRIVE_BACKUP_HOUR, 2).coerceIn(0, 23)
+
+    fun getDriveBackupMinute(): Int = prefs.getInt(KEY_DRIVE_BACKUP_MINUTE, 0).coerceIn(0, 59)
+
+    fun setDriveBackupTime(hour: Int, minute: Int) {
+        prefs.edit()
+            .putInt(KEY_DRIVE_BACKUP_HOUR, hour.coerceIn(0, 23))
+            .putInt(KEY_DRIVE_BACKUP_MINUTE, minute.coerceIn(0, 59))
+            .apply()
+    }
+
+    fun getBackupHistory(): List<BackupHistoryEntry> {
+        return readList<BackupHistoryEntry>(KEY_BACKUP_HISTORY)
+            .sortedByDescending { it.timestamp }
+    }
+
+    fun appendBackupHistory(entry: BackupHistoryEntry) {
+        val updated = buildList {
+            add(entry.copy(message = entry.message.take(220)))
+            addAll(getBackupHistory())
+        }.distinctBy { it.id }
+            .take(60)
+        writeList(KEY_BACKUP_HISTORY, updated)
+    }
+
     fun getHomeCardOrder(): List<String> {
         val saved = readList<String>(KEY_HOME_CARD_ORDER)
         return normalizeHomeCardOrder(saved)
@@ -234,6 +280,48 @@ class SettingsStore(context: Context) {
         )
     }
 
+    fun exportBackupSettings(): BackupSettings {
+        return BackupSettings(
+            debugModeEnabled = isDebugModeEnabled(),
+            debugPhoneNumber = getDebugPhoneNumber(),
+            aiReviewEnabled = isAiReviewEnabled(),
+            cloudAiEnabled = isCloudAiEnabled(),
+            axisEmailAccount = getAxisEmailAccount(),
+            axisEmailAutoSyncEnabled = isAxisEmailAutoSyncEnabled(),
+            sparkMailTriggerEnabled = isSparkMailTriggerEnabled(),
+            themeMode = getThemeMode(),
+            dailyReminderEnabled = isDailyReminderEnabled(),
+            dailyReminderHour = getDailyReminderHour(),
+            dailyReminderMinute = getDailyReminderMinute(),
+            homeCardOrder = getHomeCardOrder(),
+            hiddenHomeCardIds = getHiddenHomeCardIds().toList(),
+            customCategories = getCustomCategories(),
+            transactionRules = getRules(),
+            budgetGoals = getBudgetGoals()
+        )
+    }
+
+    fun applyBackupSettings(settings: BackupSettings) {
+        prefs.edit()
+            .putBoolean(KEY_DEBUG_MODE, settings.debugModeEnabled)
+            .putString(KEY_DEBUG_PHONE, settings.debugPhoneNumber)
+            .putBoolean(KEY_AI_REVIEW, settings.aiReviewEnabled)
+            .putBoolean(KEY_CLOUD_AI_ENABLED, settings.cloudAiEnabled)
+            .putString(KEY_AXIS_EMAIL_ACCOUNT, settings.axisEmailAccount)
+            .putBoolean(KEY_AXIS_EMAIL_AUTO_SYNC, settings.axisEmailAutoSyncEnabled)
+            .putBoolean(KEY_SPARK_MAIL_TRIGGER_ENABLED, settings.sparkMailTriggerEnabled)
+            .putString(KEY_THEME_MODE, settings.themeMode.ifBlank { "system" })
+            .putBoolean(KEY_DAILY_REMINDER_ENABLED, settings.dailyReminderEnabled)
+            .putInt(KEY_DAILY_REMINDER_HOUR, settings.dailyReminderHour.coerceIn(0, 23))
+            .putInt(KEY_DAILY_REMINDER_MINUTE, settings.dailyReminderMinute.coerceIn(0, 59))
+            .apply()
+        setHomeCardOrder(settings.homeCardOrder)
+        setHiddenHomeCardIds(settings.hiddenHomeCardIds.toSet())
+        writeList(KEY_CUSTOM_CATEGORIES, settings.customCategories)
+        writeList(KEY_TRANSACTION_RULES, settings.transactionRules)
+        writeList(KEY_BUDGET_GOALS, settings.budgetGoals)
+    }
+
     private inline fun <reified T> readList(key: String): List<T> {
         val raw = prefs.getString(key, null) ?: return emptyList()
         val type = object : TypeToken<List<T>>() {}.type
@@ -280,6 +368,11 @@ class SettingsStore(context: Context) {
         private const val KEY_DAILY_REMINDER_ENABLED = "daily_reminder_enabled"
         private const val KEY_DAILY_REMINDER_HOUR = "daily_reminder_hour"
         private const val KEY_DAILY_REMINDER_MINUTE = "daily_reminder_minute"
+        private const val KEY_DRIVE_BACKUP_ACCOUNT = "drive_backup_account"
+        private const val KEY_DRIVE_BACKUP_AUTO_ENABLED = "drive_backup_auto_enabled"
+        private const val KEY_DRIVE_BACKUP_HOUR = "drive_backup_hour"
+        private const val KEY_DRIVE_BACKUP_MINUTE = "drive_backup_minute"
+        private const val KEY_BACKUP_HISTORY = "backup_history"
         private const val KEY_HOME_CARD_ORDER = "home_card_order"
         private const val KEY_HOME_HIDDEN_CARD_IDS = "home_hidden_card_ids"
 

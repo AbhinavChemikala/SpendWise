@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -142,6 +143,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.yourapp.spendwise.backup.BackupDestination
+import com.yourapp.spendwise.backup.BackupHistoryEntry
+import com.yourapp.spendwise.backup.BackupStatus
+import com.yourapp.spendwise.backup.BackupTrigger
+import com.yourapp.spendwise.backup.SpendWiseBackupManager
 import com.yourapp.spendwise.data.CustomCategory
 import com.yourapp.spendwise.data.BudgetGoal
 import com.yourapp.spendwise.data.BudgetProgress
@@ -312,6 +318,16 @@ fun SpendWiseApp(vm: MainViewModel) {
     var transactionPendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var selectedTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
     var transactionDialogMode by rememberSaveable { mutableStateOf(TransactionDialogMode.VIEW) }
+    val backupExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        uri?.let(vm::exportBackupToUri)
+    }
+    val backupRestoreLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let(vm::restoreBackupFromUri)
+    }
     val gmailConnectLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -322,6 +338,18 @@ fun SpendWiseApp(vm: MainViewModel) {
             vm.setDebugStatus("Unable to connect Gmail for Axis email sync.")
         } else {
             vm.connectAxisEmailAccount(account?.email.orEmpty())
+        }
+    }
+    val driveConnectLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data ?: return@rememberLauncherForActivityResult
+        val task = GoogleSignIn.getSignedInAccountFromIntent(data)
+        val account = runCatching { task.getResult(Exception::class.java) }.getOrNull()
+        if (account?.email.isNullOrBlank()) {
+            vm.setDebugStatus("Unable to connect Google Drive backup.")
+        } else {
+            vm.connectDriveBackupAccount(account?.email.orEmpty())
         }
     }
 
@@ -592,6 +620,27 @@ fun SpendWiseApp(vm: MainViewModel) {
                     onSetThemeMode = vm::setThemeMode,
                     onToggleDailyReminder = vm::toggleDailyReminder,
                     onSetDailyReminderTime = vm::setDailyReminderTime,
+                    onExportLocalBackup = {
+                        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))
+                        backupExportLauncher.launch("spendwise-backup-$stamp.json")
+                    },
+                    onRestoreLocalBackup = {
+                        backupRestoreLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
+                    },
+                    onConnectDriveBackup = {
+                        val client = SpendWiseBackupManager.buildDriveSignInClient(context)
+                        client.signOut().addOnCompleteListener {
+                            driveConnectLauncher.launch(client.signInIntent)
+                        }
+                    },
+                    onDisconnectDriveBackup = {
+                        SpendWiseBackupManager.buildDriveSignInClient(context).signOut()
+                        vm.disconnectDriveBackupAccount()
+                    },
+                    onToggleDriveBackupAuto = vm::toggleDriveBackupAuto,
+                    onSetDriveBackupTime = vm::setDriveBackupTime,
+                    onPushBackupToDrive = vm::pushBackupToDrive,
+                    onRestoreBackupFromDrive = vm::restoreBackupFromDrive,
                     onPhoneChange = vm::updateDebugPhoneNumber,
                     onSimulateTemplate = { template ->
                         vm.simulateIncomingSms(template.sender, template.body, template.title)
@@ -1102,6 +1151,14 @@ private fun SettingsScreen(
     onSetThemeMode: (String) -> Unit,
     onToggleDailyReminder: (Boolean) -> Unit,
     onSetDailyReminderTime: (Int, Int) -> Unit,
+    onExportLocalBackup: () -> Unit,
+    onRestoreLocalBackup: () -> Unit,
+    onConnectDriveBackup: () -> Unit,
+    onDisconnectDriveBackup: () -> Unit,
+    onToggleDriveBackupAuto: (Boolean) -> Unit,
+    onSetDriveBackupTime: (Int, Int) -> Unit,
+    onPushBackupToDrive: () -> Unit,
+    onRestoreBackupFromDrive: () -> Unit,
     onPhoneChange: (String) -> Unit,
     onSimulateTemplate: (DebugSmsTemplate) -> Unit,
     onSendTemplate: (DebugSmsTemplate) -> Unit
@@ -1110,6 +1167,9 @@ private fun SettingsScreen(
     var editingRule by remember { mutableStateOf<TransactionRule?>(null) }
     var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
     var showEmailSyncHistory by rememberSaveable { mutableStateOf(false) }
+    var showBackupHistory by rememberSaveable { mutableStateOf(false) }
+    var showLocalRestoreConfirm by rememberSaveable { mutableStateOf(false) }
+    var showDriveRestoreConfirm by rememberSaveable { mutableStateOf(false) }
     var showReviewCenter by rememberSaveable { mutableStateOf(false) }
     var showSpamInbox by rememberSaveable { mutableStateOf(false) }
     var showDebugConsole by rememberSaveable { mutableStateOf(false) }
@@ -1139,6 +1199,35 @@ private fun SettingsScreen(
         EmailSyncHistoryDialog(
             entries = uiState.axisEmailSyncHistory,
             onDismiss = { showEmailSyncHistory = false }
+        )
+    }
+
+    if (showBackupHistory) {
+        BackupHistoryDialog(
+            entries = uiState.backupHistory,
+            onDismiss = { showBackupHistory = false }
+        )
+    }
+
+    if (showLocalRestoreConfirm) {
+        RestoreBackupConfirmDialog(
+            source = "a local backup file",
+            onDismiss = { showLocalRestoreConfirm = false },
+            onConfirm = {
+                showLocalRestoreConfirm = false
+                onRestoreLocalBackup()
+            }
+        )
+    }
+
+    if (showDriveRestoreConfirm) {
+        RestoreBackupConfirmDialog(
+            source = "Google Drive",
+            onDismiss = { showDriveRestoreConfirm = false },
+            onConfirm = {
+                showDriveRestoreConfirm = false
+                onRestoreBackupFromDrive()
+            }
         )
     }
 
@@ -1196,6 +1285,25 @@ private fun SettingsScreen(
                 minute = uiState.dailyReminderMinute,
                 onToggle = onToggleDailyReminder,
                 onTimeChange = onSetDailyReminderTime
+            )
+        }
+        item {
+            BackupSettingsCard(
+                driveAccount = uiState.driveBackupAccount,
+                driveAutoEnabled = uiState.driveBackupAutoEnabled,
+                driveHour = uiState.driveBackupHour,
+                driveMinute = uiState.driveBackupMinute,
+                history = uiState.backupHistory,
+                isBusy = uiState.isBackupBusy,
+                onExportLocal = onExportLocalBackup,
+                onRestoreLocal = { showLocalRestoreConfirm = true },
+                onConnectDrive = onConnectDriveBackup,
+                onDisconnectDrive = onDisconnectDriveBackup,
+                onToggleDriveAuto = onToggleDriveBackupAuto,
+                onDriveTimeChange = onSetDriveBackupTime,
+                onPushDrive = onPushBackupToDrive,
+                onRestoreDrive = { showDriveRestoreConfirm = true },
+                onOpenHistory = { showBackupHistory = true }
             )
         }
         // ── Theme Toggle ────────────────────────────────────────────────────────
@@ -1857,10 +1965,235 @@ private fun DailyReminderCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BackupSettingsCard(
+    driveAccount: String,
+    driveAutoEnabled: Boolean,
+    driveHour: Int,
+    driveMinute: Int,
+    history: List<BackupHistoryEntry>,
+    isBusy: Boolean,
+    onExportLocal: () -> Unit,
+    onRestoreLocal: () -> Unit,
+    onConnectDrive: () -> Unit,
+    onDisconnectDrive: () -> Unit,
+    onToggleDriveAuto: (Boolean) -> Unit,
+    onDriveTimeChange: (Int, Int) -> Unit,
+    onPushDrive: () -> Unit,
+    onRestoreDrive: () -> Unit,
+    onOpenHistory: () -> Unit
+) {
+    var showDriveTimeDialog by rememberSaveable { mutableStateOf(false) }
+    val latest = history.firstOrNull()
+    val formattedTime = formatReminderTime(driveHour, driveMinute)
+
+    if (showDriveTimeDialog) {
+        ReminderTimeDialog(
+            initialHour = driveHour,
+            initialMinute = driveMinute,
+            title = "Drive backup time",
+            description = "Use 24-hour time. Backups use this phone's current timezone: ${ZoneId.systemDefault().id}.",
+            validText = { hour, minute -> "Drive backup will run at ${formatReminderTime(hour, minute)}." },
+            onDismiss = { showDriveTimeDialog = false },
+            onSave = { hour, minute ->
+                showDriveTimeDialog = false
+                onDriveTimeChange(hour, minute)
+            }
+        )
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text("BACKUP, EXPORT & RESTORE", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Black)
+            Text(
+                text = "Export a local SpendWise backup or keep one private backup in your Google Drive app data.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Local backup", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Creates a JSON file with transactions, review history, category AI records, budgets, rules, categories, and layout settings.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TextButton(onClick = onExportLocal, enabled = !isBusy) {
+                            Text(if (isBusy) "Working" else "Export file")
+                        }
+                        TextButton(onClick = onRestoreLocal, enabled = !isBusy) {
+                            Text("Restore file")
+                        }
+                    }
+                }
+            }
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Google Drive backup", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (driveAccount.isBlank()) {
+                                    "Connect Google Drive to push and restore a private SpendWise backup."
+                                } else {
+                                    "Connected: $driveAccount"
+                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        AssistChip(
+                            onClick = if (driveAccount.isBlank()) onConnectDrive else onDisconnectDrive,
+                            label = { Text(if (driveAccount.isBlank()) "Connect" else "Disconnect") }
+                        )
+                    }
+
+                    if (driveAccount.isNotBlank()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Daily Drive backup", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (driveAutoEnabled) "Every day at $formattedTime" else "Automatic backup is paused.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = driveAutoEnabled,
+                                onCheckedChange = onToggleDriveAuto
+                            )
+                        }
+
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Backup time", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                                    Text(formattedTime, fontWeight = FontWeight.Black)
+                                    Text(
+                                        ZoneId.systemDefault().id,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                TextButton(onClick = { showDriveTimeDialog = true }) {
+                                    Text("Change time")
+                                }
+                            }
+                        }
+
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            TextButton(onClick = onPushDrive, enabled = !isBusy) {
+                                Text(if (isBusy) "Working" else "Push now")
+                            }
+                            TextButton(onClick = onRestoreDrive, enabled = !isBusy) {
+                                Text("Restore latest")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenHistory() }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Backup history", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = latest?.let {
+                                "${BackupTrigger.label(it.trigger)} · ${BackupDestination.label(it.destination)} · ${BackupStatus.label(it.status)} · ${it.transactionCount} transactions"
+                            } ?: "See exports, restores, Drive pushes, and automatic backup runs.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ReceiptLong,
+                        contentDescription = "Open backup history",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RestoreBackupConfirmDialog(
+    source: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Restore backup?") },
+        text = {
+            Text("This will replace the current SpendWise transactions and saved backup-supported settings with data from $source.")
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Restore")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 @Composable
 private fun ReminderTimeDialog(
     initialHour: Int,
     initialMinute: Int,
+    title: String = "Daily reminder time",
+    description: String = "Use 24-hour time. The reminder uses this phone's current timezone: ${ZoneId.systemDefault().id}.",
+    validText: (Int, Int) -> String = { hour, minute ->
+        "Reminder will run at ${formatReminderTime(hour, minute)}."
+    },
     onDismiss: () -> Unit,
     onSave: (Int, Int) -> Unit
 ) {
@@ -1872,11 +2205,11 @@ private fun ReminderTimeDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Daily reminder time") },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Use 24-hour time. The reminder uses this phone's current timezone: ${ZoneId.systemDefault().id}.",
+                    text = description,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1899,7 +2232,7 @@ private fun ReminderTimeDialog(
                 }
                 Text(
                     text = if (isValid) {
-                        "Reminder will run at ${formatReminderTime(parsedHour ?: 0, parsedMinute ?: 0)}."
+                        validText(parsedHour ?: 0, parsedMinute ?: 0)
                     } else {
                         "Enter an hour from 0-23 and minute from 0-59."
                     },
@@ -1918,6 +2251,107 @@ private fun ReminderTimeDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+@Composable
+private fun BackupHistoryDialog(
+    entries: List<BackupHistoryEntry>,
+    onDismiss: () -> Unit
+) {
+    val background = MaterialTheme.colorScheme.background
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(background)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                                contentDescription = "Close backup history"
+                            )
+                        }
+                        Column {
+                            Text("Backup history", fontWeight = FontWeight.Bold)
+                            Text(
+                                "Local exports, restores, Drive pushes, and automatic runs.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                if (entries.isEmpty()) {
+                    EmptyStateCard("No backup history yet.")
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(bottom = 24.dp)
+                    ) {
+                        items(entries, key = { it.id }) { entry ->
+                            BackupHistoryCard(entry)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupHistoryCard(entry: BackupHistoryEntry) {
+    val statusColor = if (entry.status == BackupStatus.FAILED) AccentPink else AccentGreen
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "${BackupTrigger.label(entry.trigger)} · ${BackupDestination.label(entry.destination)}",
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(formatDate(entry.timestamp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(
+                BackupStatus.label(entry.status),
+                color = statusColor,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Items ${entry.itemCount} · Transactions ${entry.transactionCount}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (entry.message.isNotBlank()) {
+                Text(entry.message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
 }
 
 @Composable

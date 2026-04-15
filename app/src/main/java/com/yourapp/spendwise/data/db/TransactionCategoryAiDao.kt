@@ -11,6 +11,9 @@ interface TransactionCategoryAiDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(record: TransactionCategoryAiEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(records: List<TransactionCategoryAiEntity>): List<Long>
+
     @Query(
         """
         SELECT * FROM transaction_category_ai
@@ -31,4 +34,10 @@ interface TransactionCategoryAiDao {
 
     @Query("DELETE FROM transaction_category_ai WHERE transactionId = :transactionId")
     suspend fun deleteByTransactionId(transactionId: Long): Int
+
+    @Query("SELECT * FROM transaction_category_ai ORDER BY id ASC")
+    suspend fun getAll(): List<TransactionCategoryAiEntity>
+
+    @Query("DELETE FROM transaction_category_ai")
+    suspend fun deleteAll(): Int
 }
