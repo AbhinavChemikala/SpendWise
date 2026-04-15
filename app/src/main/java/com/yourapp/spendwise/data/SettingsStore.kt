@@ -3,6 +3,7 @@ package com.yourapp.spendwise.data
 import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.yourapp.spendwise.mail.AxisEmailSyncHistoryEntry
 
 class SettingsStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(
@@ -76,6 +77,41 @@ class SettingsStore(context: Context) {
 
     fun setAxisEmailRecentMessageIds(messageIds: List<String>) {
         writeList(KEY_AXIS_EMAIL_MESSAGE_IDS, messageIds.filter { it.isNotBlank() }.distinct().takeLast(200))
+    }
+
+    fun getAxisEmailSyncHistory(): List<AxisEmailSyncHistoryEntry> {
+        return readList<AxisEmailSyncHistoryEntry>(KEY_AXIS_EMAIL_SYNC_HISTORY)
+            .sortedByDescending { it.startedAt }
+    }
+
+    fun appendAxisEmailSyncHistory(entry: AxisEmailSyncHistoryEntry) {
+        val trimmedItems = entry.items
+            .take(8)
+            .map { item ->
+                item.copy(
+                    summary = item.summary.take(180),
+                    cleanedBody = item.cleanedBody.take(1200),
+                    fullBody = item.fullBody.take(4000)
+                )
+            }
+        val updated = buildList {
+            add(entry.copy(items = trimmedItems))
+            addAll(getAxisEmailSyncHistory())
+        }.distinctBy { it.id }
+            .take(40)
+        writeList(KEY_AXIS_EMAIL_SYNC_HISTORY, updated)
+    }
+
+    fun isSparkMailTriggerEnabled(): Boolean = prefs.getBoolean(KEY_SPARK_MAIL_TRIGGER_ENABLED, false)
+
+    fun setSparkMailTriggerEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SPARK_MAIL_TRIGGER_ENABLED, enabled).apply()
+    }
+
+    fun getSparkMailTriggerLastSyncMs(): Long = prefs.getLong(KEY_SPARK_MAIL_TRIGGER_LAST_SYNC_MS, 0L)
+
+    fun setSparkMailTriggerLastSyncMs(timestampMs: Long) {
+        prefs.edit().putLong(KEY_SPARK_MAIL_TRIGGER_LAST_SYNC_MS, timestampMs.coerceAtLeast(0L)).apply()
     }
 
     /** "system", "light", or one of the dark theme mode strings. */
@@ -237,6 +273,9 @@ class SettingsStore(context: Context) {
         private const val KEY_AXIS_EMAIL_AUTO_SYNC = "axis_email_auto_sync"
         private const val KEY_AXIS_EMAIL_LAST_SYNC_MS = "axis_email_last_sync_ms"
         private const val KEY_AXIS_EMAIL_MESSAGE_IDS = "axis_email_message_ids"
+        private const val KEY_AXIS_EMAIL_SYNC_HISTORY = "axis_email_sync_history"
+        private const val KEY_SPARK_MAIL_TRIGGER_ENABLED = "spark_mail_trigger_enabled"
+        private const val KEY_SPARK_MAIL_TRIGGER_LAST_SYNC_MS = "spark_mail_trigger_last_sync_ms"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DAILY_REMINDER_ENABLED = "daily_reminder_enabled"
         private const val KEY_DAILY_REMINDER_HOUR = "daily_reminder_hour"

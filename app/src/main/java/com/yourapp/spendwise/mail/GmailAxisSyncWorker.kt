@@ -10,7 +10,12 @@ class GmailAxisSyncWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
-        val result = GmailAxisSyncManager.syncNow(applicationContext)
+        val trigger = inputData.getString(GmailAxisSyncManager.INPUT_TRIGGER)
+            ?: AxisEmailSyncTrigger.PERIODIC
+        val result = GmailAxisSyncManager.syncNow(
+            context = applicationContext,
+            trigger = trigger
+        )
         return if (result.message.contains("Reconnect Gmail", ignoreCase = true)) {
             Result.retry()
         } else {

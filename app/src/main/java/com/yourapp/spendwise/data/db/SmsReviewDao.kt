@@ -65,6 +65,7 @@ interface SmsReviewDao {
         """
         SELECT * FROM sms_review_events
         WHERE finalStatus IN ('SPAM_DISCARDED', 'AI_REJECTED')
+          AND NOT (eventSource = 'EMAIL' AND finalStatus = 'SPAM_DISCARDED')
         ORDER BY receivedAt DESC
         LIMIT 150
         """

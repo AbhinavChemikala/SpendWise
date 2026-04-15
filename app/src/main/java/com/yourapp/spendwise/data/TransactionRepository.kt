@@ -15,7 +15,10 @@ import com.yourapp.spendwise.data.db.TransactionCategoryAiEntity
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
 import com.yourapp.spendwise.mail.AxisEmailSyncResult
+import com.yourapp.spendwise.mail.AxisEmailSyncHistoryEntry
+import com.yourapp.spendwise.mail.AxisEmailSyncTrigger
 import com.yourapp.spendwise.mail.GmailAxisSyncManager
+import com.yourapp.spendwise.mail.NotificationAccessHelper
 import com.yourapp.spendwise.sms.SmsIntakeOutcome
 import com.yourapp.spendwise.sms.SmsIntakeManager
 import com.yourapp.spendwise.sms.SmsProcessor
@@ -718,12 +721,22 @@ class TransactionRepository(context: Context) {
 
     fun getAxisEmailLastSyncMs(): Long = settingsStore.getAxisEmailLastSyncMs()
 
+    fun getAxisEmailSyncHistory(): List<AxisEmailSyncHistoryEntry> = settingsStore.getAxisEmailSyncHistory()
+
+    fun isSparkMailTriggerEnabled(): Boolean = settingsStore.isSparkMailTriggerEnabled()
+
+    fun setSparkMailTriggerEnabled(enabled: Boolean) {
+        settingsStore.setSparkMailTriggerEnabled(enabled)
+    }
+
+    fun hasSparkNotificationAccess(): Boolean = NotificationAccessHelper.hasNotificationAccess(appContext)
+
     fun ensureAxisEmailSyncSchedule() {
         GmailAxisSyncManager.ensureScheduled(appContext)
     }
 
-    suspend fun syncAxisEmailsNow(): AxisEmailSyncResult {
-        return GmailAxisSyncManager.syncNow(appContext)
+    suspend fun syncAxisEmailsNow(trigger: String = AxisEmailSyncTrigger.MANUAL): AxisEmailSyncResult {
+        return GmailAxisSyncManager.syncNow(appContext, trigger)
     }
 
     fun getThemeMode(): String = settingsStore.getThemeMode()

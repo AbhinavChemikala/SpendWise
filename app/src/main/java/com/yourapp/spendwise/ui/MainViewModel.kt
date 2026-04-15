@@ -28,6 +28,8 @@ import com.yourapp.spendwise.data.db.SmsReviewEntity
 import com.yourapp.spendwise.data.db.TransactionCategoryAiEntity
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
+import com.yourapp.spendwise.mail.AxisEmailSyncHistoryEntry
+import com.yourapp.spendwise.mail.AxisEmailSyncTrigger
 import com.yourapp.spendwise.sms.AiProcessingService
 import com.yourapp.spendwise.sms.SmsIntakeOutcome
 import com.yourapp.spendwise.sms.SmsPipelineEvent
@@ -88,7 +90,10 @@ data class DashboardUiState(
     val axisEmailAccount: String = "",
     val axisEmailAutoSyncEnabled: Boolean = true,
     val axisEmailLastSyncMs: Long = 0L,
+    val axisEmailSyncHistory: List<AxisEmailSyncHistoryEntry> = emptyList(),
     val isAxisEmailSyncing: Boolean = false,
+    val sparkMailTriggerEnabled: Boolean = false,
+    val hasSparkNotificationAccess: Boolean = false,
     val themeMode: String = THEME_MODE_SYSTEM,
     val dailyReminderEnabled: Boolean = true,
     val dailyReminderHour: Int = 22,
@@ -128,6 +133,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             axisEmailAccount = repository.getAxisEmailAccount(),
             axisEmailAutoSyncEnabled = repository.isAxisEmailAutoSyncEnabled(),
             axisEmailLastSyncMs = repository.getAxisEmailLastSyncMs(),
+            axisEmailSyncHistory = repository.getAxisEmailSyncHistory(),
+            sparkMailTriggerEnabled = repository.isSparkMailTriggerEnabled(),
+            hasSparkNotificationAccess = repository.hasSparkNotificationAccess(),
             themeMode = normalizeThemeMode(repository.getThemeMode()),
             dailyReminderEnabled = repository.isDailyReminderEnabled(),
             dailyReminderHour = repository.getDailyReminderHour(),
@@ -221,6 +229,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setAppForeground(isForeground: Boolean) {
         isAppInForeground = isForeground
         if (isForeground) {
+            refreshNotificationAccessState()
+            refreshAxisEmailSyncHistory()
             checkPendingCount()
             maybeSyncAxisEmailsInForeground()
             // Delegate to the foreground service — it handles both foreground
@@ -236,7 +246,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val staleEnough = System.currentTimeMillis() - state.axisEmailLastSyncMs > 15 * 60 * 1000L
         if (staleEnough) {
-            syncAxisEmailsNow(silent = true)
+            syncAxisEmailsNow(trigger = AxisEmailSyncTrigger.FOREGROUND, silent = true)
+        }
+    }
+
+    fun refreshAxisEmailSyncHistory() {
+        _uiState.update {
+            it.copy(axisEmailSyncHistory = repository.getAxisEmailSyncHistory())
         }
     }
 
@@ -280,6 +296,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(cloudAiApiKey = key) }
     }
 
+    fun refreshNotificationAccessState() {
+        _uiState.update {
+            it.copy(hasSparkNotificationAccess = repository.hasSparkNotificationAccess())
+        }
+    }
+
     fun connectAxisEmailAccount(email: String) {
         if (email.isBlank()) {
             _uiState.update { it.copy(debugStatusMessage = "Unable to read the selected Gmail account.") }
@@ -294,7 +316,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 debugStatusMessage = "Connected Gmail for Axis email sync."
             )
         }
-        syncAxisEmailsNow(silent = true)
+        syncAxisEmailsNow(trigger = AxisEmailSyncTrigger.CONNECT, silent = true)
     }
 
     fun disconnectAxisEmailAccount() {
@@ -304,6 +326,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 axisEmailAccount = "",
                 axisEmailAutoSyncEnabled = false,
                 axisEmailLastSyncMs = 0L,
+                axisEmailSyncHistory = repository.getAxisEmailSyncHistory(),
                 isAxisEmailSyncing = false,
                 debugStatusMessage = "Disconnected Gmail Axis sync."
             )
@@ -324,15 +347,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun syncAxisEmailsNow(silent: Boolean = false) {
+    fun toggleSparkMailTrigger(enabled: Boolean) {
+        repository.setSparkMailTriggerEnabled(enabled)
+        _uiState.update {
+            it.copy(
+                sparkMailTriggerEnabled = repository.isSparkMailTriggerEnabled(),
+                hasSparkNotificationAccess = repository.hasSparkNotificationAccess(),
+                debugStatusMessage = if (enabled) {
+                    "Spark Mail trigger enabled."
+                } else {
+                    "Spark Mail trigger disabled."
+                }
+            )
+        }
+    }
+
+    fun syncAxisEmailsNow(
+        trigger: String = AxisEmailSyncTrigger.MANUAL,
+        silent: Boolean = false
+    ) {
         if (_uiState.value.axisEmailAccount.isBlank()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isAxisEmailSyncing = true) }
-            val result = repository.syncAxisEmailsNow()
+            val result = repository.syncAxisEmailsNow(trigger)
             _uiState.update {
                 it.copy(
                     isAxisEmailSyncing = false,
                     axisEmailLastSyncMs = repository.getAxisEmailLastSyncMs(),
+                    axisEmailSyncHistory = repository.getAxisEmailSyncHistory(),
                     debugStatusMessage = if (silent) {
                         it.debugStatusMessage
                     } else {

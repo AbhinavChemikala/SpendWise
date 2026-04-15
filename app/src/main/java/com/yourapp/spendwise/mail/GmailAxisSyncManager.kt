@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import android.util.Log
 import androidx.work.Constraints
+import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -23,6 +24,7 @@ import com.yourapp.spendwise.data.SettingsStore
 import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.PendingSmsEntity
 import com.yourapp.spendwise.data.db.TransactionEntity
+import com.yourapp.spendwise.sms.AiProcessingService
 import com.yourapp.spendwise.sms.SmsIntakeManager
 import com.yourapp.spendwise.sms.SmsIntakeOutcome
 import java.util.Locale
@@ -58,8 +60,14 @@ private data class GmailMessageResponse(
 
 private data class GmailPayload(
     val mimeType: String? = null,
+    val headers: List<GmailHeader> = emptyList(),
     val body: GmailBody? = null,
     val parts: List<GmailPayload> = emptyList()
+)
+
+private data class GmailHeader(
+    val name: String = "",
+    val value: String = ""
 )
 
 private data class GmailBody(
@@ -71,6 +79,7 @@ object GmailAxisSyncManager {
     private const val QUERY_SENDER = "from:alerts@axis.bank.in"
     private const val WORK_NAME_PERIODIC = "axis_email_periodic_sync"
     private const val WORK_NAME_IMMEDIATE = "axis_email_immediate_sync"
+    const val INPUT_TRIGGER = "axis_email_sync_trigger"
     private const val SCOPE_URI = "https://www.googleapis.com/auth/gmail.readonly"
     private const val OAUTH_SCOPE = "oauth2:$SCOPE_URI"
     private const val MAX_MESSAGES_PER_SYNC = 20L
@@ -124,8 +133,12 @@ object GmailAxisSyncManager {
         }
     }
 
-    fun enqueueImmediateSync(context: Context) {
+    fun enqueueImmediateSync(
+        context: Context,
+        trigger: String = AxisEmailSyncTrigger.MANUAL
+    ) {
         val request = OneTimeWorkRequestBuilder<GmailAxisSyncWorker>()
+            .setInputData(Data.Builder().putString(INPUT_TRIGGER, trigger).build())
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
@@ -140,6 +153,7 @@ object GmailAxisSyncManager {
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
         val request = PeriodicWorkRequestBuilder<GmailAxisSyncWorker>(15, TimeUnit.MINUTES)
+            .setInputData(Data.Builder().putString(INPUT_TRIGGER, AxisEmailSyncTrigger.PERIODIC).build())
             .setConstraints(constraints)
             .build()
         WorkManager.getInstance(context.applicationContext).enqueueUniquePeriodicWork(
@@ -149,22 +163,60 @@ object GmailAxisSyncManager {
         )
     }
 
-    suspend fun syncNow(context: Context): AxisEmailSyncResult = withContext(Dispatchers.IO) {
+    suspend fun syncNow(
+        context: Context,
+        trigger: String = AxisEmailSyncTrigger.MANUAL
+    ): AxisEmailSyncResult = withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
         val settings = SettingsStore(appContext)
         val accountEmail = settings.getAxisEmailAccount()
+        val startedAt = System.currentTimeMillis()
+        val historyItems = mutableListOf<AxisEmailSyncHistoryItem>()
         if (accountEmail.isBlank()) {
-            return@withContext AxisEmailSyncResult(message = "Connect Gmail first.")
+            val result = AxisEmailSyncResult(message = "Connect Gmail first.")
+            settings.appendAxisEmailSyncHistory(
+                buildHistoryEntry(
+                    account = "",
+                    trigger = trigger,
+                    startedAt = startedAt,
+                    result = result,
+                    items = historyItems,
+                    status = "NO_ACCOUNT"
+                )
+            )
+            return@withContext result
         }
 
         val accessToken = try {
             GoogleAuthUtil.getToken(appContext, accountEmail, OAUTH_SCOPE)
         } catch (recoverable: UserRecoverableAuthException) {
             Log.w(TAG, "User action required for Gmail token", recoverable)
-            return@withContext AxisEmailSyncResult(message = "Reconnect Gmail to continue Axis mail sync.")
+            val result = AxisEmailSyncResult(message = "Reconnect Gmail to continue Axis mail sync.")
+            settings.appendAxisEmailSyncHistory(
+                buildHistoryEntry(
+                    account = accountEmail,
+                    trigger = trigger,
+                    startedAt = startedAt,
+                    result = result,
+                    items = historyItems,
+                    status = "AUTH_REQUIRED"
+                )
+            )
+            return@withContext result
         } catch (throwable: Throwable) {
             Log.e(TAG, "Unable to get Gmail access token", throwable)
-            return@withContext AxisEmailSyncResult(message = "Unable to access Gmail right now.")
+            val result = AxisEmailSyncResult(message = "Unable to access Gmail right now.")
+            settings.appendAxisEmailSyncHistory(
+                buildHistoryEntry(
+                    account = accountEmail,
+                    trigger = trigger,
+                    startedAt = startedAt,
+                    result = result,
+                    items = historyItems,
+                    status = "AUTH_FAILED"
+                )
+            )
+            return@withContext result
         }
 
         val lastSyncMs = settings.getAxisEmailLastSyncMs()
@@ -173,7 +225,18 @@ object GmailAxisSyncManager {
         val messageIds = listMessageIds(accessToken, lastSyncMs)
         if (messageIds.isEmpty()) {
             settings.setAxisEmailLastSyncMs(System.currentTimeMillis())
-            return@withContext AxisEmailSyncResult(message = "No new Axis emails found.")
+            val result = AxisEmailSyncResult(message = "No new Axis emails found.")
+            settings.appendAxisEmailSyncHistory(
+                buildHistoryEntry(
+                    account = accountEmail,
+                    trigger = trigger,
+                    startedAt = startedAt,
+                    result = result,
+                    items = historyItems,
+                    status = "NO_MATCHES"
+                )
+            )
+            return@withContext result
         }
 
         val database = AppDatabase.getInstance(appContext)
@@ -193,6 +256,12 @@ object GmailAxisSyncManager {
             scanned += 1
             val message = fetchMessage(accessToken, messageId)
             if (message == null) {
+                historyItems += AxisEmailSyncHistoryItem(
+                    messageId = messageId,
+                    receivedAt = System.currentTimeMillis(),
+                    outcome = "Fetch failed",
+                    from = "alerts@axis.bank.in"
+                )
                 skipped += 1
                 return@forEach
             }
@@ -201,28 +270,95 @@ object GmailAxisSyncManager {
             val body = extractBody(message).ifBlank { message.snippet }
             val candidate = AxisEmailParser.parse(body, internalDate)
             if (candidate == null) {
+                historyItems += AxisEmailSyncHistoryItem(
+                    messageId = messageId,
+                    receivedAt = internalDate,
+                    outcome = "No transaction found",
+                    from = extractHeader(message, "From").ifBlank { "alerts@axis.bank.in" },
+                    summary = message.snippet.ifBlank { body.take(180) },
+                    fullBody = body
+                )
                 skipped += 1
                 return@forEach
             }
             if (isDuplicate(candidate, transactionDao.getAllTransactionsList(), pendingSmsDao.getAll())) {
+                historyItems += AxisEmailSyncHistoryItem(
+                    messageId = messageId,
+                    receivedAt = candidate.timestampMs,
+                    outcome = "Skipped duplicate",
+                    from = extractHeader(message, "From").ifBlank { "alerts@axis.bank.in" },
+                    summary = message.snippet.ifBlank { candidate.normalizedBody.take(180) },
+                    parsedAmount = candidate.amount,
+                    parsedType = candidate.type.name,
+                    parsedMerchant = candidate.merchantHint,
+                    cleanedBody = candidate.normalizedBody,
+                    fullBody = candidate.fullBody
+                )
                 duplicates += 1
                 return@forEach
             }
 
-            when (
-                SmsIntakeManager.ingest(
+            when (val intakeOutcome =
+                SmsIntakeManager.ingestEmailCandidate(
                     context = appContext,
                     sender = "alerts@axis.bank.in",
                     body = candidate.normalizedBody,
                     timestamp = candidate.timestampMs,
+                    amount = candidate.amount,
+                    type = candidate.type,
+                    merchant = candidate.merchantHint,
+                    bank = "Axis Bank",
                     eventSource = "EMAIL",
-                    emitNotifications = false,
+                    emitNotifications = true,
                     emitPendingEvent = true
                 )
             ) {
-                is SmsIntakeOutcome.Confirmed,
-                is SmsIntakeOutcome.Pending -> imported += 1
-                SmsIntakeOutcome.Discarded -> skipped += 1
+                is SmsIntakeOutcome.Confirmed -> {
+                    imported += 1
+                    historyItems += AxisEmailSyncHistoryItem(
+                        messageId = messageId,
+                        receivedAt = candidate.timestampMs,
+                        outcome = "Added instantly",
+                        from = extractHeader(message, "From").ifBlank { "alerts@axis.bank.in" },
+                        summary = message.snippet.ifBlank { candidate.normalizedBody.take(180) },
+                        parsedAmount = candidate.amount,
+                        parsedType = candidate.type.name,
+                        parsedMerchant = candidate.merchantHint,
+                        cleanedBody = candidate.normalizedBody,
+                        fullBody = candidate.fullBody
+                    )
+                }
+                is SmsIntakeOutcome.Pending -> {
+                    AiProcessingService.start(appContext)
+                    imported += 1
+                    historyItems += AxisEmailSyncHistoryItem(
+                        messageId = messageId,
+                        receivedAt = candidate.timestampMs,
+                        outcome = "Queued for AI",
+                        from = extractHeader(message, "From").ifBlank { "alerts@axis.bank.in" },
+                        summary = message.snippet.ifBlank { candidate.normalizedBody.take(180) },
+                        parsedAmount = candidate.amount,
+                        parsedType = candidate.type.name,
+                        parsedMerchant = candidate.merchantHint,
+                        cleanedBody = candidate.normalizedBody,
+                        fullBody = candidate.fullBody
+                    )
+                }
+                SmsIntakeOutcome.Discarded -> {
+                    skipped += 1
+                    historyItems += AxisEmailSyncHistoryItem(
+                        messageId = messageId,
+                        receivedAt = candidate.timestampMs,
+                        outcome = "Skipped by intake",
+                        from = extractHeader(message, "From").ifBlank { "alerts@axis.bank.in" },
+                        summary = message.snippet.ifBlank { candidate.normalizedBody.take(180) },
+                        parsedAmount = candidate.amount,
+                        parsedType = candidate.type.name,
+                        parsedMerchant = candidate.merchantHint,
+                        cleanedBody = candidate.normalizedBody,
+                        fullBody = candidate.fullBody
+                    )
+                }
             }
         }
 
@@ -232,7 +368,7 @@ object GmailAxisSyncManager {
         }
         settings.setAxisEmailLastSyncMs(maxOf(maxSeenTimestamp, System.currentTimeMillis()))
 
-        AxisEmailSyncResult(
+        val result = AxisEmailSyncResult(
             scanned = scanned,
             imported = imported,
             duplicates = duplicates,
@@ -244,6 +380,17 @@ object GmailAxisSyncManager {
                 else -> "Axis emails checked."
             }
         )
+        settings.appendAxisEmailSyncHistory(
+            buildHistoryEntry(
+                account = accountEmail,
+                trigger = trigger,
+                startedAt = startedAt,
+                result = result,
+                items = historyItems,
+                status = "SUCCESS"
+            )
+        )
+        result
     }
 
     private fun listMessageIds(accessToken: String, lastSyncMs: Long): List<String> {
@@ -294,6 +441,14 @@ object GmailAxisSyncManager {
 
     private fun extractBody(message: GmailMessageResponse): String {
         return extractPayloadBody(message.payload).ifBlank { message.snippet }
+    }
+
+    private fun extractHeader(message: GmailMessageResponse, name: String): String {
+        return message.payload?.headers
+            .orEmpty()
+            .firstOrNull { it.name.equals(name, ignoreCase = true) }
+            ?.value
+            .orEmpty()
     }
 
     private fun extractPayloadBody(payload: GmailPayload?): String {
@@ -348,5 +503,29 @@ object GmailAxisSyncManager {
         return transaction.bank.contains("axis", ignoreCase = true) ||
             transaction.sourceSender.contains("axis", ignoreCase = true) ||
             transaction.accountLabel.contains("axis", ignoreCase = true)
+    }
+
+    private fun buildHistoryEntry(
+        account: String,
+        trigger: String,
+        startedAt: Long,
+        result: AxisEmailSyncResult,
+        items: List<AxisEmailSyncHistoryItem>,
+        status: String
+    ): AxisEmailSyncHistoryEntry {
+        return AxisEmailSyncHistoryEntry(
+            id = "$startedAt-${trigger.lowercase(Locale.ENGLISH)}",
+            startedAt = startedAt,
+            finishedAt = System.currentTimeMillis(),
+            trigger = trigger,
+            account = account,
+            status = status,
+            scanned = result.scanned,
+            imported = result.imported,
+            duplicates = result.duplicates,
+            skipped = result.skipped,
+            message = result.message,
+            items = items
+        )
     }
 }

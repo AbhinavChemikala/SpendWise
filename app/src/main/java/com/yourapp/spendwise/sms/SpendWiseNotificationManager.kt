@@ -125,6 +125,53 @@ object SpendWiseNotificationManager {
         )
     }
 
+    fun showEmailPendingReview(
+        context: Context,
+        notificationId: Int,
+        preview: SmsDetectionPreview,
+        senderLabel: String = "Axis Bank email"
+    ) {
+        if (!canNotify(context)) return
+
+        val title = when (preview.type) {
+            TransactionType.CREDIT -> "$senderLabel detected"
+            TransactionType.DEBIT -> "$senderLabel detected"
+            TransactionType.UNKNOWN -> "Transaction email detected"
+        }
+
+        val detail = buildString {
+            preview.amount?.let {
+                append(formatRupees(it))
+                append(
+                    when (preview.type) {
+                        TransactionType.CREDIT -> " credit"
+                        TransactionType.DEBIT -> " debit"
+                        TransactionType.UNKNOWN -> " transaction"
+                    }
+                )
+            } ?: append("A transaction-like email")
+            preview.merchant.takeIf { it.isNotBlank() && it != "Unknown Merchant" }?.let {
+                append(" for ")
+                append(it)
+            }
+            append(". SpendWise is verifying it before adding it.")
+        }
+
+        notify(
+            context = context,
+            notificationId = notificationId,
+            builder = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_spendwise)
+                .setContentTitle(title)
+                .setContentText(detail)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setContentIntent(getMainActivityPendingIntent(context))
+        )
+    }
+
     fun showConfirmedTransaction(
         context: Context,
         notificationId: Int,
@@ -133,10 +180,15 @@ object SpendWiseNotificationManager {
     ) {
         if (!canNotify(context)) return
 
-        val title = when (transaction.type) {
-            TransactionType.CREDIT -> "Income detected"
-            TransactionType.DEBIT -> "Expense detected"
-            TransactionType.UNKNOWN -> "Transaction detected"
+        val isEmailOrigin = transaction.sourceSender.contains("@", ignoreCase = true) ||
+            transaction.sourceSender.contains("axis.bank.in", ignoreCase = true)
+        val title = when {
+            isEmailOrigin && transaction.type == TransactionType.CREDIT -> "Income confirmed from email"
+            isEmailOrigin && transaction.type == TransactionType.DEBIT -> "Expense confirmed from email"
+            isEmailOrigin -> "Transaction confirmed from email"
+            transaction.type == TransactionType.CREDIT -> "Income detected"
+            transaction.type == TransactionType.DEBIT -> "Expense detected"
+            else -> "Transaction detected"
         }
         val detail = buildString {
             append(formatRupees(transaction.amount))
@@ -149,8 +201,10 @@ object SpendWiseNotificationManager {
             )
             append(" at ")
             append(transaction.merchant)
-            if (isAiVerified) {
-                append(". Verified with on-device AI.")
+            when {
+                isEmailOrigin && isAiVerified -> append(". Added from Axis Bank email after AI verification.")
+                isEmailOrigin -> append(". Added from Axis Bank email.")
+                isAiVerified -> append(". Verified with on-device AI.")
             }
         }
 

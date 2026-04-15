@@ -4,7 +4,9 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.gson.Gson
@@ -162,7 +164,9 @@ import com.yourapp.spendwise.data.db.SmsReviewEntity
 import com.yourapp.spendwise.data.db.TransactionCategoryAiEntity
 import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
+import com.yourapp.spendwise.mail.AxisEmailSyncHistoryEntry
 import com.yourapp.spendwise.mail.GmailAxisSyncManager
+import com.yourapp.spendwise.mail.AxisEmailSyncTrigger
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDateTime
@@ -539,7 +543,12 @@ fun SpendWiseApp(vm: MainViewModel) {
                     vm.disconnectAxisEmailAccount()
                 },
                 onToggleAxisEmailAutoSync = vm::toggleAxisEmailAutoSync,
-                onSyncAxisEmails = vm::syncAxisEmailsNow,
+                onSyncAxisEmails = { vm.syncAxisEmailsNow(trigger = AxisEmailSyncTrigger.MANUAL) },
+                onToggleSparkMailTrigger = vm::toggleSparkMailTrigger,
+                onOpenSparkNotificationAccess = {
+                    vm.refreshNotificationAccessState()
+                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                },
                 onRecoverLegacyAiFailures = vm::recoverLegacyAiFailures,
                 onSetThemeMode = vm::setThemeMode,
                 onToggleDailyReminder = vm::toggleDailyReminder,
@@ -1047,6 +1056,8 @@ private fun SettingsScreen(
     onDisconnectAxisEmail: () -> Unit,
     onToggleAxisEmailAutoSync: (Boolean) -> Unit,
     onSyncAxisEmails: () -> Unit,
+    onToggleSparkMailTrigger: (Boolean) -> Unit,
+    onOpenSparkNotificationAccess: () -> Unit,
     onRecoverLegacyAiFailures: () -> Unit,
     onSetThemeMode: (String) -> Unit,
     onToggleDailyReminder: (Boolean) -> Unit,
@@ -1058,6 +1069,7 @@ private fun SettingsScreen(
     var showCategoryDialog by rememberSaveable { mutableStateOf(false) }
     var editingRule by remember { mutableStateOf<TransactionRule?>(null) }
     var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
+    var showEmailSyncHistory by rememberSaveable { mutableStateOf(false) }
     var showReviewCenter by rememberSaveable { mutableStateOf(false) }
     var showSpamInbox by rememberSaveable { mutableStateOf(false) }
     var showDebugConsole by rememberSaveable { mutableStateOf(false) }
@@ -1080,6 +1092,13 @@ private fun SettingsScreen(
                 onAddCategory(it)
                 showCategoryDialog = false
             }
+        )
+    }
+
+    if (showEmailSyncHistory) {
+        EmailSyncHistoryDialog(
+            entries = uiState.axisEmailSyncHistory,
+            onDismiss = { showEmailSyncHistory = false }
         )
     }
 
@@ -1325,6 +1344,81 @@ private fun SettingsScreen(
                             }
                             TextButton(onClick = onDisconnectAxisEmail) {
                                 Text("Disconnect")
+                            }
+                        }
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Spark notifications trigger sync", fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            text = "Optional. When Spark Mail posts an Axis-looking notification, SpendWise immediately starts a Gmail sync.",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        checked = uiState.sparkMailTriggerEnabled,
+                                        onCheckedChange = onToggleSparkMailTrigger
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (uiState.hasSparkNotificationAccess) {
+                                            "Notification access granted"
+                                        } else {
+                                            "Notification access required"
+                                        },
+                                        color = if (uiState.hasSparkNotificationAccess) AccentGreen else AccentAmber,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    TextButton(onClick = onOpenSparkNotificationAccess) {
+                                        Text(if (uiState.hasSparkNotificationAccess) "Manage access" else "Grant access")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (uiState.axisEmailAccount.isNotBlank() || uiState.axisEmailSyncHistory.isNotEmpty()) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showEmailSyncHistory = true }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Email sync history", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = uiState.axisEmailSyncHistory.firstOrNull()?.let { latest ->
+                                            "${AxisEmailSyncTrigger.label(latest.trigger)} · ${formatDate(latest.startedAt)} · ${latest.message}"
+                                        } ?: "See manual, periodic, and mail-notification sync runs in one place.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.ReceiptLong,
+                                    contentDescription = "Open email sync history",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
@@ -1784,6 +1878,226 @@ private fun ReminderTimeDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+@Composable
+private fun EmailSyncHistoryDialog(
+    entries: List<AxisEmailSyncHistoryEntry>,
+    onDismiss: () -> Unit
+) {
+    var selectedEntry by remember(entries) { mutableStateOf<AxisEmailSyncHistoryEntry?>(null) }
+    val background = MaterialTheme.colorScheme.background
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(background)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        ) {
+            if (selectedEntry == null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(onClick = onDismiss) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                                    contentDescription = "Close email sync history"
+                                )
+                            }
+                            Column {
+                                Text("Email sync history", fontWeight = FontWeight.Bold)
+                                Text(
+                                    "Manual, periodic, and mail-triggered sync runs.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    if (entries.isEmpty()) {
+                        EmptyStateCard("No email sync history yet.")
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            contentPadding = PaddingValues(bottom = 24.dp)
+                        ) {
+                            items(entries, key = { it.id }) { entry ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { selectedEntry = entry }
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                AxisEmailSyncTrigger.label(entry.trigger),
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                formatDate(entry.startedAt),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Text(
+                                            entry.message,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            "Scanned ${entry.scanned} · Imported ${entry.imported} · Duplicates ${entry.duplicates} · Skipped ${entry.skipped}",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                val entry = selectedEntry ?: return@Dialog
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(onClick = { selectedEntry = null }) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                                    contentDescription = "Back to email sync history"
+                                )
+                            }
+                            Column {
+                                Text("Sync run", fontWeight = FontWeight.Bold)
+                                Text(
+                                    "${AxisEmailSyncTrigger.label(entry.trigger)} · ${formatDate(entry.startedAt)}",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Close email sync history")
+                        }
+                    }
+
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(entry.message, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Account: ${entry.account.ifBlank { "Not connected" }}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Status: ${entry.status}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Scanned ${entry.scanned} · Imported ${entry.imported} · Duplicates ${entry.duplicates} · Skipped ${entry.skipped}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (entry.items.isEmpty()) {
+                        EmptyStateCard("This sync run did not pull any new Axis mail details.")
+                    } else {
+                        entry.items.forEach { item ->
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(item.outcome, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            formatDate(item.receivedAt),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (item.from.isNotBlank()) {
+                                        Text(
+                                            item.from,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (item.summary.isNotBlank()) {
+                                        Text(item.summary)
+                                    }
+                                    val parsedSummary = buildList {
+                                        item.parsedAmount?.let { add(formatRupees(it)) }
+                                        item.parsedType.takeIf { it.isNotBlank() }?.let { add(it) }
+                                        item.parsedMerchant.takeIf { it.isNotBlank() }?.let { add(it) }
+                                    }.joinToString(" · ")
+                                    if (parsedSummary.isNotBlank()) {
+                                        Text(
+                                            "Parsed: $parsedSummary",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (item.cleanedBody.isNotBlank()) {
+                                        Text("Sent to AI", fontWeight = FontWeight.Medium)
+                                        Text(
+                                            item.cleanedBody,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (item.fullBody.isNotBlank() && item.fullBody != item.cleanedBody) {
+                                        Text("Full message", fontWeight = FontWeight.Medium)
+                                        Text(
+                                            item.fullBody,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+            }
+        }
+    }
 }
 
 @Composable

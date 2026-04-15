@@ -6,6 +6,7 @@ import com.yourapp.spendwise.data.TransactionFactory
 import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.PendingSmsEntity
 import com.yourapp.spendwise.data.db.SmsReviewEntity
+import com.yourapp.spendwise.data.db.TransactionType
 import com.yourapp.spendwise.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +18,157 @@ sealed class SmsIntakeOutcome {
 }
 
 object SmsIntakeManager {
+    suspend fun ingestEmailCandidate(
+        context: Context,
+        sender: String,
+        body: String,
+        timestamp: Long,
+        amount: Double,
+        type: TransactionType,
+        merchant: String,
+        bank: String,
+        eventSource: String = "EMAIL",
+        emitNotifications: Boolean = false,
+        emitPendingEvent: Boolean = true
+    ): SmsIntakeOutcome = withContext(Dispatchers.IO) {
+        val appContext = context.applicationContext
+        val database = AppDatabase.getInstance(appContext)
+        val transactionDao = database.transactionDao()
+        val pendingSmsDao = database.pendingSmsDao()
+        val reviewDao = database.smsReviewDao()
+        val settingsStore = com.yourapp.spendwise.data.SettingsStore(appContext)
+        val isAiReviewEnabled = settingsStore.isAiReviewEnabled()
+        val resolvedMerchant = merchant.ifBlank { SmsPreFilter.fallbackMerchant(body) }
+        val resolvedBank = bank.ifBlank { "Axis Bank" }
+        val debugLog = buildString {
+            appendLine("sender=$sender")
+            appendLine("source=$eventSource")
+            appendLine("prefilter=email_bypassed")
+            appendLine("amount=$amount")
+            appendLine("type=${type.name}")
+            appendLine("merchant=$resolvedMerchant")
+            append("bank=$resolvedBank")
+        }
+
+        if (transactionDao.exists(rawSms = body, timestamp = timestamp) || reviewDao.exists(body = body, receivedAt = timestamp)) {
+            reviewDao.insert(
+                SmsReviewEntity(
+                    sender = sender,
+                    body = body,
+                    receivedAt = timestamp,
+                    eventSource = eventSource,
+                    prefilterDecision = "EMAIL_DUPLICATE",
+                    previewAmount = amount,
+                    previewType = type,
+                    previewMerchant = resolvedMerchant,
+                    previewBank = resolvedBank,
+                    finalStatus = "DUPLICATE_SKIPPED",
+                    debugLog = "$debugLog\nfinal=duplicate_skipped"
+                )
+            )
+            return@withContext SmsIntakeOutcome.Discarded
+        }
+
+        if (!isAiReviewEnabled) {
+            val transaction = TransactionFactory.create(
+                context = appContext,
+                amount = amount,
+                type = type,
+                merchant = resolvedMerchant,
+                bank = resolvedBank,
+                rawSms = body,
+                sourceSender = sender,
+                timestamp = timestamp,
+                isVerifiedByAi = false,
+                verificationSource = "Email Intake"
+            )
+            val insertedId = transactionDao.insert(transaction)
+            if (insertedId != -1L) {
+                TransactionCategoryRefinementWorker.enqueue(appContext, insertedId)
+                WidgetUpdater.updateAll(appContext)
+                reviewDao.insert(
+                    SmsReviewEntity(
+                        sender = sender,
+                        body = body,
+                        receivedAt = timestamp,
+                        eventSource = eventSource,
+                        prefilterDecision = "EMAIL_DIRECT",
+                        previewAmount = amount,
+                        previewType = type,
+                        previewMerchant = resolvedMerchant,
+                        previewBank = resolvedBank,
+                        finalStatus = "AI_BYPASSED_CONFIRMED",
+                        transactionId = insertedId,
+                        debugLog = "$debugLog\nfinal=email_confirmed_no_ai"
+                    )
+                )
+                val notificationId = SpendWiseNotificationManager.directNotificationId(
+                    rawSms = body,
+                    timestamp = timestamp
+                )
+                if (emitNotifications) {
+                    SpendWiseNotificationManager.showConfirmedTransaction(
+                        context = appContext,
+                        notificationId = notificationId,
+                        transaction = transaction.copy(id = insertedId),
+                        isAiVerified = false
+                    )
+                }
+                return@withContext SmsIntakeOutcome.Confirmed(notificationId)
+            }
+            return@withContext SmsIntakeOutcome.Discarded
+        }
+
+        if (pendingSmsDao.exists(sender = sender, body = body, receivedAt = timestamp)) {
+            return@withContext SmsIntakeOutcome.Discarded
+        }
+
+        val reviewEventId = reviewDao.insert(
+            SmsReviewEntity(
+                sender = sender,
+                body = body,
+                receivedAt = timestamp,
+                eventSource = eventSource,
+                prefilterDecision = "EMAIL_QUEUED",
+                previewAmount = amount,
+                previewType = type,
+                previewMerchant = resolvedMerchant,
+                previewBank = resolvedBank,
+                finalStatus = "QUEUED_FOR_AI",
+                debugLog = "$debugLog\nfinal=queued_for_ai"
+            )
+        )
+        val pendingId = pendingSmsDao.insert(
+            PendingSmsEntity(
+                sender = sender,
+                body = body,
+                receivedAt = timestamp,
+                reviewEventId = reviewEventId
+            )
+        )
+        if (pendingId != -1L) {
+            val notificationId = SpendWiseNotificationManager.pendingNotificationId(pendingId)
+            if (emitNotifications) {
+                SpendWiseNotificationManager.showEmailPendingReview(
+                    context = appContext,
+                    notificationId = notificationId,
+                    preview = SmsDetectionPreview(
+                        amount = amount,
+                        type = type,
+                        merchant = resolvedMerchant,
+                        bank = resolvedBank
+                    ),
+                    senderLabel = "Axis Bank email"
+                )
+            }
+            if (emitPendingEvent) {
+                SmsPipelineEvents.notifyPendingQueued()
+            }
+            return@withContext SmsIntakeOutcome.Pending(pendingId = pendingId, notificationId = notificationId)
+        }
+        SmsIntakeOutcome.Discarded
+    }
+
     suspend fun ingest(
         context: Context,
         sender: String,
