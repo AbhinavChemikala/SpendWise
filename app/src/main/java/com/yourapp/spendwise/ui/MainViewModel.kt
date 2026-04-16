@@ -14,9 +14,13 @@ import com.yourapp.spendwise.data.RecurringInsight
 import com.yourapp.spendwise.data.BudgetGoal
 import com.yourapp.spendwise.data.BudgetProgress
 import com.yourapp.spendwise.data.AnomalyAlert
+import com.yourapp.spendwise.data.AccountFilterOption
+import com.yourapp.spendwise.data.AccountSummary
 import com.yourapp.spendwise.data.CashflowDay
+import com.yourapp.spendwise.data.BankSplitSummary
 import com.yourapp.spendwise.data.CompareMetric
 import com.yourapp.spendwise.data.IncomeTrendSummary
+import com.yourapp.spendwise.data.PaymentRailSummary
 import com.yourapp.spendwise.data.RangeSummary
 import com.yourapp.spendwise.data.SpecialTrackingSummary
 import com.yourapp.spendwise.data.SavingsScore
@@ -65,6 +69,12 @@ data class DashboardUiState(
     val insightFacts: List<InsightFact> = emptyList(),
     val trend: List<TrendPoint> = emptyList(),
     val paymentModes: List<PaymentModeTotal> = emptyList(),
+    val paymentRails: List<PaymentRailSummary> = emptyList(),
+    val selectedAccountFilterKey: String? = null,
+    val accountFilterOptions: List<AccountFilterOption> = emptyList(),
+    val selectedAccountSummary: AccountSummary? = null,
+    val accountSummaries: List<AccountSummary> = emptyList(),
+    val bankSplit: List<BankSplitSummary> = emptyList(),
     val topMerchants: List<MerchantAnalytics> = emptyList(),
     val duplicateInsights: List<DuplicateInsight> = emptyList(),
     val recurringInsights: List<RecurringInsight> = emptyList(),
@@ -164,6 +174,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var categoryRefinementJob: Job? = null
     private var isAppInForeground = false
     private var shouldRerunPendingProcessing = false
+    private var currentMonthTransactions: List<TransactionEntity> = emptyList()
 
     init {
         repository.ensureAxisEmailSyncSchedule()
@@ -194,10 +205,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         transactionsJob?.cancel()
         transactionsJob = viewModelScope.launch {
             repository.getTransactionsForMonth(year, month).collectLatest { transactions ->
-                val snapshot = repository.getMonthInsightSnapshot(year, month)
+                currentMonthTransactions = transactions
+                val selectedAccountFilterKey = _uiState.value.selectedAccountFilterKey
+                    ?.takeIf { key ->
+                        transactions.any {
+                            it.accountLabel.ifBlank { it.bank }.ifBlank { "Unknown" }.equals(key, ignoreCase = true)
+                        }
+                    }
+                val snapshot = repository.getMonthInsightSnapshot(year, month, selectedAccountFilterKey)
                 _uiState.update {
                     it.copy(
-                        transactions = transactions,
+                        transactions = snapshot.filteredTransactions,
                         totalSpent = snapshot.summary.totalSpent,
                         totalReceived = snapshot.summary.totalReceived,
                         transactionCount = snapshot.transactionCount,
@@ -208,6 +226,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         insightFacts = snapshot.facts,
                         trend = snapshot.trend,
                         paymentModes = snapshot.paymentModes,
+                        paymentRails = snapshot.paymentRails,
+                        selectedAccountFilterKey = selectedAccountFilterKey,
+                        accountFilterOptions = snapshot.accountFilterOptions,
+                        selectedAccountSummary = snapshot.selectedAccountSummary,
+                        accountSummaries = snapshot.accountSummaries,
+                        bankSplit = snapshot.bankSplit,
                         topMerchants = snapshot.topMerchants,
                         duplicateInsights = snapshot.duplicateInsights,
                         recurringInsights = snapshot.recurringInsights,
@@ -228,6 +252,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         checkPendingCount()
+    }
+
+    fun setSelectedAccountFilter(accountKey: String?) {
+        val normalizedKey = accountKey?.takeIf { it.isNotBlank() }
+        if (_uiState.value.selectedAccountFilterKey == normalizedKey) return
+        _uiState.update { it.copy(selectedAccountFilterKey = normalizedKey) }
+        loadCurrentMonth()
     }
 
     fun changeMonth(year: Int, month: Int) {
@@ -599,6 +630,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         "${transaction.merchant} updated."
                     } else {
                         "Unable to update ${transaction.merchant}."
+                    }
+                )
+            }
+            loadCurrentMonth()
+        }
+    }
+
+    fun mergeAccountLabels(sourceKeys: Set<String>, targetLabel: String) {
+        viewModelScope.launch {
+            val updatedCount = repository.mergeAccountLabels(sourceKeys, targetLabel)
+            val normalizedTarget = targetLabel.trim().takeIf { it.isNotBlank() }
+            val selectedKey = _uiState.value.selectedAccountFilterKey
+            _uiState.update {
+                it.copy(
+                    selectedAccountFilterKey = if (
+                        normalizedTarget != null &&
+                        selectedKey != null &&
+                        sourceKeys.any { key -> key.equals(selectedKey, ignoreCase = true) }
+                    ) {
+                        normalizedTarget
+                    } else {
+                        selectedKey
+                    },
+                    debugStatusMessage = if (updatedCount > 0) {
+                        if (sourceKeys.size > 1) {
+                            "Merged ${sourceKeys.size} account labels into $targetLabel."
+                        } else {
+                            "Renamed account label to $targetLabel."
+                        }
+                    } else {
+                        "No account labels were updated."
                     }
                 )
             }

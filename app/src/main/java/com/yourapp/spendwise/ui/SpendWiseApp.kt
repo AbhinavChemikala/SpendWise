@@ -152,7 +152,10 @@ import com.yourapp.spendwise.data.CustomCategory
 import com.yourapp.spendwise.data.BudgetGoal
 import com.yourapp.spendwise.data.BudgetProgress
 import com.yourapp.spendwise.data.AnomalyAlert
+import com.yourapp.spendwise.data.AccountFilterOption
+import com.yourapp.spendwise.data.AccountSummary
 import com.yourapp.spendwise.data.CashflowDay
+import com.yourapp.spendwise.data.BankSplitSummary
 import com.yourapp.spendwise.data.CategoryCatalog
 import com.yourapp.spendwise.data.CategoryDecisionSource
 import com.yourapp.spendwise.data.CategoryResolution
@@ -163,6 +166,7 @@ import com.yourapp.spendwise.data.InsightFact
 import com.yourapp.spendwise.data.IncomeTrendSummary
 import com.yourapp.spendwise.data.MerchantAnalytics
 import com.yourapp.spendwise.data.PaymentModeTotal
+import com.yourapp.spendwise.data.PaymentRailSummary
 import com.yourapp.spendwise.data.RangeSummary
 import com.yourapp.spendwise.data.RecurringInsight
 import com.yourapp.spendwise.data.SummaryRangeType
@@ -212,6 +216,7 @@ private data class AdvancedFilterState(
 private object HomeCardId {
     const val STATUS = "status"
     const val QUICK_SUMMARY = "quick_summary"
+    const val ACCOUNTS = "accounts"
     const val HERO_SUMMARY = "hero_summary"
     const val SAVINGS_SCORE = "savings_score"
     const val BUDGETS = "budgets"
@@ -224,6 +229,7 @@ private object HomeCardId {
 private val DefaultHomeCardOrder = listOf(
     HomeCardId.STATUS,
     HomeCardId.QUICK_SUMMARY,
+    HomeCardId.ACCOUNTS,
     HomeCardId.HERO_SUMMARY,
     HomeCardId.SAVINGS_SCORE,
     HomeCardId.BUDGETS,
@@ -236,6 +242,7 @@ private val DefaultHomeCardOrder = listOf(
 private val HomeCardLabels = mapOf(
     HomeCardId.STATUS to "Status",
     HomeCardId.QUICK_SUMMARY to "Quick Summary",
+    HomeCardId.ACCOUNTS to "Accounts",
     HomeCardId.HERO_SUMMARY to "Total Expenses",
     HomeCardId.SAVINGS_SCORE to "Savings Score",
     HomeCardId.BUDGETS to "Budgets",
@@ -444,6 +451,7 @@ fun SpendWiseApp(vm: MainViewModel) {
             transaction = transaction,
             initialMode = transactionDialogMode,
             availableCategories = availableCategories(uiState.customCategories, uiState.transactions, transaction.category),
+            availableAccountLabels = uiState.accountSummaries.map { it.label },
             isFindingSimilarTransactions = uiState.isFindingSimilarTransactions &&
                 uiState.similarTransactionSourceId == transaction.id,
             similarTransactions = if (uiState.similarTransactionSourceId == transaction.id) {
@@ -532,6 +540,7 @@ fun SpendWiseApp(vm: MainViewModel) {
                     },
                     onRemoveDuplicateRequest = vm::ignoreDuplicate,
                     onSelectSummaryRange = vm::selectSummaryRange,
+                    onSelectAccountFilter = vm::setSelectedAccountFilter,
                     onOpenInsights = { vm.selectTab(SpendWiseTab.INSIGHTS) },
                     onOpenActivity = { vm.selectTab(SpendWiseTab.ACTIVITY) },
                     onMonthClick = { showMonthPicker = true },
@@ -552,6 +561,7 @@ fun SpendWiseApp(vm: MainViewModel) {
                         transactionDialogMode = TransactionDialogMode.EDIT
                     },
                     onRemoveDuplicateRequest = vm::ignoreDuplicate,
+                    onSelectAccountFilter = vm::setSelectedAccountFilter,
                     onMonthClick = { showMonthPicker = true }
                 )
 
@@ -559,6 +569,7 @@ fun SpendWiseApp(vm: MainViewModel) {
                     modifier = Modifier.padding(innerPadding),
                     uiState = uiState,
                     onSelectSummaryRange = vm::selectSummaryRange,
+                    onSelectAccountFilter = vm::setSelectedAccountFilter,
                     onMonthClick = { showMonthPicker = true }
                 )
 
@@ -641,6 +652,7 @@ fun SpendWiseApp(vm: MainViewModel) {
                     onSetDriveBackupTime = vm::setDriveBackupTime,
                     onPushBackupToDrive = vm::pushBackupToDrive,
                     onRestoreBackupFromDrive = vm::restoreBackupFromDrive,
+                    onMergeAccountLabels = vm::mergeAccountLabels,
                     onPhoneChange = vm::updateDebugPhoneNumber,
                     onSimulateTemplate = { template ->
                         vm.simulateIncomingSms(template.sender, template.body, template.title)
@@ -680,6 +692,7 @@ private fun HomeScreen(
     onEditTransaction: (TransactionEntity) -> Unit,
     onRemoveDuplicateRequest: (TransactionEntity) -> Unit,
     onSelectSummaryRange: (SummaryRangeType) -> Unit,
+    onSelectAccountFilter: (String?) -> Unit,
     onOpenInsights: () -> Unit,
     onOpenActivity: () -> Unit,
     onMonthClick: () -> Unit,
@@ -726,6 +739,15 @@ private fun HomeScreen(
                 }
             )
         }
+        if (uiState.accountFilterOptions.isNotEmpty()) {
+            item {
+                AccountFilterChips(
+                    selectedKey = uiState.selectedAccountFilterKey,
+                    options = uiState.accountFilterOptions,
+                    onSelect = onSelectAccountFilter
+                )
+            }
+        }
         items(displayedCardOrder, key = { it }) { cardId ->
             EditableHomeCard(
                 cardId = cardId,
@@ -742,6 +764,11 @@ private fun HomeScreen(
                         ranges = uiState.rangeSummaries,
                         onSelect = onSelectSummaryRange
                     )
+                    HomeCardId.ACCOUNTS -> AccountsOverviewCard(
+                        accountSummaries = uiState.accountSummaries,
+                        selectedKey = uiState.selectedAccountFilterKey,
+                        onSelect = onSelectAccountFilter
+                    )
                     HomeCardId.HERO_SUMMARY -> HeroSummaryCard(uiState)
                     HomeCardId.SAVINGS_SCORE -> SavingsScoreCard(uiState.savingsScore, uiState.incomeTrend)
                     HomeCardId.BUDGETS -> BudgetProgressCard(uiState.budgetProgress)
@@ -750,7 +777,7 @@ private fun HomeScreen(
                     HomeCardId.INSIGHTS_PREVIEW -> InsightsPreviewCard(
                         totalSpent = uiState.totalSpent,
                         topCategories = uiState.topCategories,
-                        paymentModes = uiState.paymentModes,
+                        paymentRails = uiState.paymentRails,
                         onViewAll = onOpenInsights
                     )
                     HomeCardId.RECENT_TRANSACTIONS -> RecentTransactionsHomeCard(
@@ -876,6 +903,99 @@ private fun HiddenHomeCardPlaceholder(cardId: String) {
 }
 
 @Composable
+private fun AccountFilterChips(
+    selectedKey: String?,
+    options: List<AccountFilterOption>,
+    onSelect: (String?) -> Unit
+) {
+    if (options.isEmpty()) return
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 2.dp)
+    ) {
+        item {
+            FilterChip(
+                selected = selectedKey == null,
+                onClick = { onSelect(null) },
+                label = { Text("All accounts") }
+            )
+        }
+        items(options, key = { it.key }) { option ->
+            FilterChip(
+                selected = selectedKey == option.key,
+                onClick = { onSelect(option.key) },
+                label = {
+                    Text(
+                        option.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountsOverviewCard(
+    accountSummaries: List<AccountSummary>,
+    selectedKey: String?,
+    onSelect: (String?) -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            SectionTitle(title = "Accounts")
+            if (accountSummaries.isEmpty()) {
+                EmptyStateCard("Account views appear once bank or card labels are available.")
+            } else {
+                FilterChip(
+                    selected = selectedKey == null,
+                    onClick = { onSelect(null) },
+                    label = { Text("All accounts") }
+                )
+                accountSummaries.forEach { account ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { onSelect(if (selectedKey == account.key) null else account.key) }
+                            .background(
+                                if (selectedKey == account.key) {
+                                    AccentPurple.copy(alpha = 0.12f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                                }
+                            )
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(account.label, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "${account.transactionCount} transactions · Income ${formatRupees(account.income)}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Text(
+                            formatRupees(account.spent),
+                            color = AccentPink,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun RecentTransactionsHomeCard(
     transactions: List<TransactionEntity>,
     duplicateTransactionIds: Set<Long>,
@@ -912,6 +1032,7 @@ private fun ActivityScreen(
     onOpenTransaction: (TransactionEntity) -> Unit,
     onEditTransaction: (TransactionEntity) -> Unit,
     onRemoveDuplicateRequest: (TransactionEntity) -> Unit,
+    onSelectAccountFilter: (String?) -> Unit,
     onMonthClick: () -> Unit
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -931,6 +1052,7 @@ private fun ActivityScreen(
             val matchesQuery = searchTerm.isBlank() || listOf(
                 transaction.merchant,
                 transaction.bank,
+                transaction.accountLabel,
                 transaction.category,
                 transaction.rawSms
             ).any { it.lowercase(Locale.ENGLISH).contains(searchTerm) }
@@ -985,40 +1107,11 @@ private fun ActivityScreen(
             )
         }
         item {
-            // ── Account filter chips ─────────────────────────────────
-            val accounts = remember(uiState.transactions) {
-                uiState.transactions
-                    .map { it.accountLabel.ifBlank { it.bank } }
-                    .distinct()
-                    .filter { it.isNotBlank() && it != "Unknown" }
-                    .sorted()
-            }
-            if (accounts.size > 1) {
-                var selectedAccount by rememberSaveable { mutableStateOf("") }
-                // Also feed into filter — expose via key change
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(horizontal = 2.dp)
-                ) {
-                    item {
-                        FilterChip(
-                            selected = selectedAccount.isEmpty(),
-                            onClick = { selectedAccount = ""; advancedFilters = advancedFilters.copy(bank = "") },
-                            label = { Text("All Accounts") }
-                        )
-                    }
-                    items(accounts) { acc ->
-                        FilterChip(
-                            selected = selectedAccount == acc,
-                            onClick = {
-                                selectedAccount = acc
-                                advancedFilters = advancedFilters.copy(bank = acc)
-                            },
-                            label = { Text(acc) }
-                        )
-                    }
-                }
-            }
+            AccountFilterChips(
+                selectedKey = uiState.selectedAccountFilterKey,
+                options = uiState.accountFilterOptions,
+                onSelect = onSelectAccountFilter
+            )
         }
         item {
             FilterBar(
@@ -1051,6 +1144,7 @@ private fun InsightsScreen(
     modifier: Modifier,
     uiState: DashboardUiState,
     onSelectSummaryRange: (SummaryRangeType) -> Unit,
+    onSelectAccountFilter: (String?) -> Unit,
     onMonthClick: () -> Unit
 ) {
     var selectedTrendIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -1068,6 +1162,13 @@ private fun InsightsScreen(
                 onMonthClick = onMonthClick
             )
         }
+        item {
+            AccountFilterChips(
+                selectedKey = uiState.selectedAccountFilterKey,
+                options = uiState.accountFilterOptions,
+                onSelect = onSelectAccountFilter
+            )
+        }
         item { StatusCard(uiState) }
         item {
             SummaryRangeCard(
@@ -1077,31 +1178,15 @@ private fun InsightsScreen(
             )
         }
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                CompactAmountCard(
-                    modifier = Modifier.weight(1f),
-                    label = "Expenses",
-                    amount = uiState.totalSpent,
-                    color = AccentPink
-                )
-                CompactAmountCard(
-                    modifier = Modifier.weight(1f),
-                    label = "Income",
-                    amount = uiState.totalReceived,
-                    color = AccentTeal
-                )
-            }
+            FactsCard(uiState.insightFacts)
         }
-        item { FactsCard(uiState.insightFacts) }
         item { CompareMetricsCard(uiState.compareMetrics, uiState.totalSpent, uiState.totalReceived) }
         item { IncomeTrendCard(uiState.incomeTrend) }
         item { BudgetProgressCard(uiState.budgetProgress) }
         item { AnomalyAlertsCard(uiState.anomalyAlerts) }
         item { CashflowCard(uiState.cashflowDays) }
         item { SpecialTrackingCard(uiState) }
+        item { BankSplitCard(uiState.bankSplit) }
         item {
             SpendingBreakdownCard(
                 totalSpent = uiState.totalSpent,
@@ -1109,7 +1194,7 @@ private fun InsightsScreen(
             )
         }
         item { TopCategoriesCard(uiState.topCategories, uiState.totalSpent) }
-        item { PaymentModeCard(uiState.paymentModes, uiState.totalSpent) }
+        item { PaymentModeCard(uiState.paymentRails, uiState.totalSpent) }
         item { MerchantAnalyticsCard(uiState.topMerchants) }
         item { RecurringInsightsCard(uiState.recurringInsights, title = "Subscriptions & Recurring") }
         item { DuplicateInsightsCard(uiState.duplicateInsights) }
@@ -1159,6 +1244,7 @@ private fun SettingsScreen(
     onSetDriveBackupTime: (Int, Int) -> Unit,
     onPushBackupToDrive: () -> Unit,
     onRestoreBackupFromDrive: () -> Unit,
+    onMergeAccountLabels: (Set<String>, String) -> Unit,
     onPhoneChange: (String) -> Unit,
     onSimulateTemplate: (DebugSmsTemplate) -> Unit,
     onSendTemplate: (DebugSmsTemplate) -> Unit
@@ -1168,6 +1254,7 @@ private fun SettingsScreen(
     var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
     var showEmailSyncHistory by rememberSaveable { mutableStateOf(false) }
     var showBackupHistory by rememberSaveable { mutableStateOf(false) }
+    var showAccountMergeDialog by rememberSaveable { mutableStateOf(false) }
     var showLocalRestoreConfirm by rememberSaveable { mutableStateOf(false) }
     var showDriveRestoreConfirm by rememberSaveable { mutableStateOf(false) }
     var showReviewCenter by rememberSaveable { mutableStateOf(false) }
@@ -1206,6 +1293,17 @@ private fun SettingsScreen(
         BackupHistoryDialog(
             entries = uiState.backupHistory,
             onDismiss = { showBackupHistory = false }
+        )
+    }
+
+    if (showAccountMergeDialog) {
+        AccountMergeDialog(
+            accounts = uiState.accountSummaries,
+            onDismiss = { showAccountMergeDialog = false },
+            onSave = { sourceKeys, targetLabel ->
+                onMergeAccountLabels(sourceKeys, targetLabel)
+                showAccountMergeDialog = false
+            }
         )
     }
 
@@ -1678,6 +1776,12 @@ private fun SettingsScreen(
             )
         }
         item {
+            AccountLabelManagementCard(
+                accountSummaries = uiState.accountSummaries,
+                onOpenMergeDialog = { showAccountMergeDialog = true }
+            )
+        }
+        item {
             RuleManagementCard(
                 rules = uiState.transactionRules,
                 onAddRule = { editingRule = TransactionRule() },
@@ -1883,6 +1987,27 @@ private fun StatusCard(uiState: DashboardUiState) {
                 }
             }
         }
+
+        uiState.selectedAccountSummary != null -> AccountStatusCard(uiState.selectedAccountSummary)
+    }
+}
+
+@Composable
+private fun AccountStatusCard(account: AccountSummary) {
+    Card(colors = CardDefaults.cardColors(containerColor = AccentPurple.copy(alpha = 0.1f))) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text("Account focus", fontWeight = FontWeight.SemiBold, color = AccentPurple)
+            Text(account.label, fontWeight = FontWeight.Bold)
+            Text(
+                "${account.transactionCount} transactions · Spent ${formatRupees(account.spent)} · Income ${formatRupees(account.income)}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -1962,6 +2087,7 @@ private fun DailyReminderCard(
                 }
             }
         }
+
     }
 }
 
@@ -2157,6 +2283,7 @@ private fun BackupSettingsCard(
                 }
             }
         }
+
     }
 }
 
@@ -2624,6 +2751,7 @@ private fun SummaryRangeCard(
 
 @Composable
 private fun HeroSummaryCard(uiState: DashboardUiState) {
+    val account = uiState.selectedAccountSummary
     Card(colors = CardDefaults.cardColors(containerColor = Color.Transparent), shape = RoundedCornerShape(28.dp)) {
         Column(
             modifier = Modifier
@@ -2634,24 +2762,37 @@ private fun HeroSummaryCard(uiState: DashboardUiState) {
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Text("TOTAL EXPENSES", color = Color.White.copy(alpha = 0.85f), fontWeight = FontWeight.Bold)
+            Text(
+                if (account != null) "THIS ACCOUNT" else "TOTAL EXPENSES",
+                color = Color.White.copy(alpha = 0.85f),
+                fontWeight = FontWeight.Bold
+            )
             Text(
                 text = formatRupees(uiState.totalSpent),
                 color = Color.White,
                 fontWeight = FontWeight.Black
             )
+            Text(
+                text = if (account != null) {
+                    "${account.label} spent this month"
+                } else {
+                    "Across all tracked accounts this month"
+                },
+                color = Color.White.copy(alpha = 0.88f),
+                fontWeight = FontWeight.Medium
+            )
             Row(modifier = Modifier.fillMaxWidth()) {
                 StatBlock(Modifier.weight(1f), "Transactions", uiState.transactionCount.toString(), Color.White)
                 StatBlock(
                     Modifier.weight(1f),
-                    "Cash out",
-                    formatRupees(uiState.specialTracking.cashWithdrawals),
+                    if (account != null) "Income" else "Cash out",
+                    if (account != null) formatRupees(account.income) else formatRupees(uiState.specialTracking.cashWithdrawals),
                     Color.White
                 )
                 StatBlock(
                     Modifier.weight(1f),
-                    "Top category",
-                    uiState.topCategoryName,
+                    if (account != null) "Account" else "Top category",
+                    if (account != null) account.label else uiState.topCategoryName,
                     Color.White
                 )
             }
@@ -2751,14 +2892,14 @@ private fun BudgetProgressCard(progress: List<BudgetProgress>) {
 private fun InsightsPreviewCard(
     totalSpent: Double,
     topCategories: List<CategoryTotal>,
-    paymentModes: List<PaymentModeTotal>,
+    paymentRails: List<PaymentRailSummary>,
     onViewAll: () -> Unit
 ) {
     val chartValues = topCategories.ifEmpty { listOf(CategoryTotal("Other", 1.0)) }
     val previewCategories = topCategories.ifEmpty { listOf(CategoryTotal("Other", 0.0)) }
     val chartColors = donutColors(chartValues.size)
     val topCategoryName = topCategories.firstOrNull()?.category ?: "No category yet"
-    val topPaymentMode = paymentModes.firstOrNull()
+    val topPaymentMode = paymentRails.firstOrNull()
 
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(
@@ -2844,7 +2985,7 @@ private fun InsightsPreviewCard(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        topPaymentMode.mode,
+                        topPaymentMode.rail,
                         color = AccentPurple,
                         fontWeight = FontWeight.Black
                     )
@@ -3065,7 +3206,7 @@ private fun SpendingBreakdownCard(totalSpent: Double, topCategories: List<Catego
 }
 
 @Composable
-private fun PaymentModeCard(paymentModes: List<PaymentModeTotal>, totalSpent: Double) {
+private fun PaymentModeCard(paymentModes: List<PaymentRailSummary>, totalSpent: Double) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(
             modifier = Modifier
@@ -3073,17 +3214,60 @@ private fun PaymentModeCard(paymentModes: List<PaymentModeTotal>, totalSpent: Do
                 .padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("Payment Modes", fontWeight = FontWeight.Bold)
+            Text("Payment Rails", fontWeight = FontWeight.Bold)
             if (paymentModes.isEmpty()) {
-                EmptyStateCard("Payment mode insights appear after debit transactions are detected.")
+                EmptyStateCard("Payment rail insights appear after debit transactions are detected.")
             } else {
                 paymentModes.forEach { mode ->
                     val percent = if (totalSpent <= 0.0) 0 else ((mode.amount / totalSpent) * 100).toInt()
                     LegendRow(
-                        color = colorForPaymentMode(mode.mode),
-                        label = "${mode.mode} • ${mode.transactionCount}",
+                        color = colorForPaymentMode(mode.rail),
+                        label = "${mode.rail} • ${mode.transactionCount}",
                         percent = percent
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BankSplitCard(bankSplit: List<BankSplitSummary>) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text("Bank Split", fontWeight = FontWeight.Bold)
+            if (bankSplit.isEmpty()) {
+                EmptyStateCard("Bank-level trends appear after account-linked transactions are detected.")
+            } else {
+                bankSplit.forEach { bank ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(bank.bank, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "${bank.transactionCount} transactions",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(formatRupees(bank.spent), fontWeight = FontWeight.Bold, color = AccentPink)
+                            if (bank.income > 0.0) {
+                                Text(
+                                    formatRupees(bank.income),
+                                    color = AccentTeal,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3558,6 +3742,199 @@ private fun CategoryManagementCard(
 }
 
 @Composable
+private fun AccountLabelManagementCard(
+    accountSummaries: List<AccountSummary>,
+    onOpenMergeDialog: () -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Account labels", fontWeight = FontWeight.SemiBold)
+                TextButton(
+                    onClick = onOpenMergeDialog,
+                    enabled = accountSummaries.isNotEmpty()
+                ) {
+                    Text("Merge / rename")
+                }
+            }
+            Text(
+                "Merge slight bank/card label variants into one clean account label without touching unrelated accounts.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (accountSummaries.isEmpty()) {
+                Text(
+                    "Account labels will appear here once transactions with bank or card details are detected.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    accountSummaries.forEach { account ->
+                        InputChip(
+                            selected = false,
+                            onClick = onOpenMergeDialog,
+                            label = {
+                                Text(
+                                    account.label,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            colors = InputChipDefaults.inputChipColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountMergeDialog(
+    accounts: List<AccountSummary>,
+    onDismiss: () -> Unit,
+    onSave: (Set<String>, String) -> Unit
+) {
+    var selectedKeys by remember { mutableStateOf(emptySet<String>()) }
+    var finalLabel by rememberSaveable { mutableStateOf("") }
+    val scrollState = rememberScrollState()
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.9f)
+                .padding(12.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Merge account labels", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "Pick one or more labels, then choose the final account label. This only updates the selected labels.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = finalLabel,
+                    onValueChange = { finalLabel = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Final account label") },
+                    placeholder = { Text("Axis Credit ••6307") }
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    accounts.forEach { account ->
+                        val isSelected = account.key in selectedKeys
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    selectedKeys = if (isSelected) {
+                                        selectedKeys - account.key
+                                    } else {
+                                        selectedKeys + account.key
+                                    }
+                                    if (finalLabel.isBlank()) {
+                                        finalLabel = account.label
+                                    }
+                                }
+                                .background(
+                                    if (isSelected) {
+                                        AccentPurple.copy(alpha = 0.12f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                    }
+                                )
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = {
+                                    selectedKeys = if (isSelected) {
+                                        selectedKeys - account.key
+                                    } else {
+                                        selectedKeys + account.key
+                                    }
+                                    if (finalLabel.isBlank()) {
+                                        finalLabel = account.label
+                                    }
+                                }
+                            )
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(account.label, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "${account.transactionCount} transactions · ${account.bank}",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(formatRupees(account.spent), color = AccentPink, fontWeight = FontWeight.SemiBold)
+                                if (account.income > 0.0) {
+                                    Text(
+                                        formatRupees(account.income),
+                                        color = AccentTeal,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(
+                        onClick = { onSave(selectedKeys, finalLabel.trim()) },
+                        enabled = selectedKeys.isNotEmpty() && finalLabel.isNotBlank()
+                    ) {
+                        Text(
+                            if (selectedKeys.size > 1) {
+                                "Merge selected"
+                            } else {
+                                "Rename"
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun RuleManagementCard(
     rules: List<TransactionRule>,
     onAddRule: () -> Unit,
@@ -3906,6 +4283,7 @@ private fun TransactionDetailDialog(
     transaction: TransactionEntity,
     initialMode: TransactionDialogMode,
     availableCategories: List<String>,
+    availableAccountLabels: List<String>,
     isFindingSimilarTransactions: Boolean,
     similarTransactions: List<TransactionEntity>,
     categoryRefinementRecord: TransactionCategoryAiEntity?,
@@ -3922,6 +4300,7 @@ private fun TransactionDetailDialog(
     var amount by rememberSaveable(transaction.id) { mutableStateOf(transaction.amount.toString()) }
     var merchant by rememberSaveable(transaction.id) { mutableStateOf(transaction.merchant) }
     var bank by rememberSaveable(transaction.id) { mutableStateOf(transaction.bank) }
+    var accountLabel by rememberSaveable(transaction.id) { mutableStateOf(transaction.accountLabel) }
     var category by rememberSaveable(transaction.id) { mutableStateOf(transaction.category) }
     var note by rememberSaveable(transaction.id) { mutableStateOf(transaction.note) }
     var tags by rememberSaveable(transaction.id) { mutableStateOf(transaction.tags) }
@@ -3932,6 +4311,7 @@ private fun TransactionDetailDialog(
         mutableStateOf(initialMode == TransactionDialogMode.EDIT)
     }
     var showMerchantEditor by rememberSaveable(transaction.id) { mutableStateOf(false) }
+    var showAccountLabelEditor by rememberSaveable(transaction.id) { mutableStateOf(false) }
     var showNoteEditor by rememberSaveable(transaction.id) { mutableStateOf(false) }
     var showCategoryPicker by rememberSaveable(transaction.id) { mutableStateOf(false) }
     var showSimilarSheet by rememberSaveable(transaction.id) { mutableStateOf(false) }
@@ -3942,6 +4322,7 @@ private fun TransactionDetailDialog(
         amount = amount.toDoubleOrNull() ?: transaction.amount,
         merchant = merchant.ifBlank { transaction.merchant },
         bank = bank.ifBlank { transaction.bank },
+        accountLabel = accountLabel.trim(),
         category = category.ifBlank { transaction.category },
         note = note,
         tags = tags,
@@ -3954,6 +4335,7 @@ private fun TransactionDetailDialog(
     val isDirty = editedTransaction.amount != transaction.amount ||
         editedTransaction.merchant != transaction.merchant ||
         editedTransaction.bank != transaction.bank ||
+        editedTransaction.accountLabel != transaction.accountLabel ||
         editedTransaction.category != transaction.category ||
         editedTransaction.note != transaction.note ||
         editedTransaction.tags != transaction.tags ||
@@ -4010,6 +4392,17 @@ private fun TransactionDetailDialog(
             onSave = {
                 merchant = it.trim()
                 showMerchantEditor = false
+            }
+        )
+    }
+    if (showAccountLabelEditor) {
+        AccountLabelEditorDialog(
+            initialValue = accountLabel,
+            suggestions = availableAccountLabels.filter { it.isNotBlank() }.distinct(),
+            onDismiss = { showAccountLabelEditor = false },
+            onSave = {
+                accountLabel = it.trim()
+                showAccountLabelEditor = false
             }
         )
     }
@@ -4199,6 +4592,15 @@ private fun TransactionDetailDialog(
                         subtitle = "Category",
                         actionLabel = "Change",
                         onClick = { showCategoryPicker = true }
+                    )
+                }
+                item {
+                    DetailActionCard(
+                        iconCategory = "Other",
+                        title = accountLabel.ifBlank { bank.ifBlank { "No account label" } },
+                        subtitle = "Account label",
+                        actionLabel = "Change",
+                        onClick = { showAccountLabelEditor = true }
                     )
                 }
                 item {
@@ -4743,6 +5145,7 @@ private fun TransactionTextEditorDialog(
     initialValue: String,
     keyboardType: KeyboardType,
     isValid: (String) -> Boolean,
+    suggestions: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (String) -> Unit
 ) {
@@ -4759,6 +5162,24 @@ private fun TransactionTextEditorDialog(
                 label = { Text(label) },
                 keyboardOptions = KeyboardOptions(keyboardType = keyboardType)
             )
+            if (suggestions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(suggestions.distinct()) { suggestion ->
+                        FilterChip(
+                            selected = value.trim() == suggestion,
+                            onClick = { value = suggestion },
+                            label = {
+                                Text(
+                                    suggestion,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        )
+                    }
+                }
+            }
         },
         confirmButton = {
             TextButton(
@@ -4770,6 +5191,105 @@ private fun TransactionTextEditorDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AccountLabelEditorDialog(
+    initialValue: String,
+    suggestions: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var selectedSuggestion by rememberSaveable(initialValue) {
+        mutableStateOf(initialValue.takeIf { it.isNotBlank() && it in suggestions })
+    }
+    var customLabel by rememberSaveable(initialValue) {
+        mutableStateOf(initialValue.takeIf { it !in suggestions }.orEmpty())
+    }
+
+    val finalValue = (customLabel.ifBlank { selectedSuggestion.orEmpty() }).trim()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Edit account label", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Pick an existing label or type a new one.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (suggestions.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "Suggestions",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            suggestions.forEach { suggestion ->
+                                FilterChip(
+                                    selected = selectedSuggestion == suggestion && customLabel.isBlank(),
+                                    onClick = {
+                                        selectedSuggestion = suggestion
+                                        customLabel = ""
+                                    },
+                                    label = {
+                                        Text(
+                                            suggestion,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = customLabel,
+                    onValueChange = {
+                        customLabel = it
+                        if (it.isNotBlank()) {
+                            selectedSuggestion = null
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("New label") },
+                    placeholder = { Text("Axis Credit ••6307") }
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(
+                        enabled = finalValue.isNotBlank(),
+                        onClick = { onSave(finalValue) }
+                    ) {
+                        Text("Save")
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -5557,8 +6077,10 @@ private fun colorForCategory(category: String) = when (category) {
 private fun colorForPaymentMode(mode: String) = when (mode) {
     "UPI" -> Color(0xFF26A7E8)
     "Card" -> Color(0xFFFF7096)
+    "Credit Card" -> Color(0xFFFF7096)
     "ATM" -> Color(0xFFF5A623)
     "Bank Transfer" -> Color(0xFF2BB4A0)
+    "Other" -> Color(0xFF9C6ADE)
     else -> Color(0xFF9C6ADE)
 }
 

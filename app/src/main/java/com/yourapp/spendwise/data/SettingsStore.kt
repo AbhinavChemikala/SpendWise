@@ -379,6 +379,7 @@ class SettingsStore(context: Context) {
         private val DEFAULT_HOME_CARD_ORDER = listOf(
             "status",
             "quick_summary",
+            "accounts",
             "hero_summary",
             "savings_score",
             "budgets",

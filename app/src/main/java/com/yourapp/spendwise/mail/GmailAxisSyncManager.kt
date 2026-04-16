@@ -84,6 +84,7 @@ object GmailAxisSyncManager {
     private const val OAUTH_SCOPE = "oauth2:$SCOPE_URI"
     private const val MAX_MESSAGES_PER_SYNC = 20L
     private const val DUPLICATE_WINDOW_MS = 10L * 60L * 1000L
+    private val accountNumberRegex = Regex("""(?i)\b(?:account|a/c)\s*(?:number|no\.?)?\s*:\s*([A-Z0-9*X-]{4,})""")
 
     private val gson = Gson()
     private val client = OkHttpClient()
@@ -479,11 +480,13 @@ object GmailAxisSyncManager {
         transactions: List<TransactionEntity>,
         pendingSms: List<PendingSmsEntity>
     ): Boolean {
+        val candidateAccountHint = extractAccountHint(candidate.normalizedBody)
         val hasTransactionMatch = transactions.any { transaction ->
             abs(transaction.timestamp - candidate.timestampMs) <= DUPLICATE_WINDOW_MS &&
                 transaction.type == candidate.type &&
                 abs(transaction.amount - candidate.amount) < 0.01 &&
                 isAxisRelated(transaction) &&
+                accountMatches(candidateAccountHint, transaction) &&
                 (
                     candidate.reference.isBlank() ||
                         transaction.rawSms.contains(candidate.reference, ignoreCase = true) ||
@@ -495,7 +498,8 @@ object GmailAxisSyncManager {
         return pendingSms.any { pending ->
             abs(pending.receivedAt - candidate.timestampMs) <= DUPLICATE_WINDOW_MS &&
                 pending.sender.contains("AXIS", ignoreCase = true) &&
-                pending.body.contains(candidate.amount.toInt().toString())
+                pending.body.contains(candidate.amount.toInt().toString()) &&
+                accountMatches(candidateAccountHint, pending.body)
         }
     }
 
@@ -503,6 +507,27 @@ object GmailAxisSyncManager {
         return transaction.bank.contains("axis", ignoreCase = true) ||
             transaction.sourceSender.contains("axis", ignoreCase = true) ||
             transaction.accountLabel.contains("axis", ignoreCase = true)
+    }
+
+    private fun extractAccountHint(body: String): String {
+        return accountNumberRegex.find(body)
+            ?.groupValues
+            ?.getOrNull(1)
+            .orEmpty()
+            .takeLast(4)
+            .filter(Char::isDigit)
+    }
+
+    private fun accountMatches(candidateAccountHint: String, transaction: TransactionEntity): Boolean {
+        if (candidateAccountHint.isBlank()) return true
+        val source = listOf(transaction.accountLabel, transaction.rawSms, transaction.note, transaction.bank)
+            .joinToString(" ")
+        return source.contains(candidateAccountHint, ignoreCase = true)
+    }
+
+    private fun accountMatches(candidateAccountHint: String, body: String): Boolean {
+        if (candidateAccountHint.isBlank()) return true
+        return body.contains(candidateAccountHint, ignoreCase = true)
     }
 
     private fun buildHistoryEntry(

@@ -55,6 +55,35 @@ data class PaymentModeTotal(
     val transactionCount: Int
 )
 
+data class AccountFilterOption(
+    val key: String,
+    val label: String,
+    val bank: String
+)
+
+data class AccountSummary(
+    val key: String,
+    val label: String,
+    val bank: String,
+    val spent: Double,
+    val income: Double,
+    val transactionCount: Int,
+    val latestTimestamp: Long
+)
+
+data class BankSplitSummary(
+    val bank: String,
+    val spent: Double,
+    val income: Double,
+    val transactionCount: Int
+)
+
+data class PaymentRailSummary(
+    val rail: String,
+    val amount: Double,
+    val transactionCount: Int
+)
+
 data class MerchantAnalytics(
     val merchant: String,
     val totalAmount: Double,
@@ -149,6 +178,7 @@ data class SmsImportSummary(
 
 data class MonthInsightSnapshot(
     val summary: MonthlySummary,
+    val filteredTransactions: List<TransactionEntity>,
     val transactionCount: Int,
     val averageDailySpend: Double,
     val topCategories: List<CategoryTotal>,
@@ -157,6 +187,11 @@ data class MonthInsightSnapshot(
     val facts: List<InsightFact>,
     val trend: List<TrendPoint>,
     val paymentModes: List<PaymentModeTotal>,
+    val paymentRails: List<PaymentRailSummary>,
+    val accountFilterOptions: List<AccountFilterOption>,
+    val selectedAccountSummary: AccountSummary?,
+    val accountSummaries: List<AccountSummary>,
+    val bankSplit: List<BankSplitSummary>,
     val topMerchants: List<MerchantAnalytics>,
     val duplicateInsights: List<DuplicateInsight>,
     val recurringInsights: List<RecurringInsight>,
@@ -214,26 +249,46 @@ class TransactionRepository(context: Context) {
         smsProcessor.drainPendingQueue(onProgress)
     }
 
-    suspend fun getMonthInsightSnapshot(year: Int, month: Int): MonthInsightSnapshot = withContext(Dispatchers.IO) {
+    suspend fun getMonthInsightSnapshot(
+        year: Int,
+        month: Int,
+        accountFilterKey: String? = null
+    ): MonthInsightSnapshot = withContext(Dispatchers.IO) {
         val (startMs, endMs) = getMonthRange(year, month)
-        val summary = transactionDao.getMonthlySummary(startMs, endMs)
-        val topCategories = transactionDao.getTopCategories(startMs, endMs)
-        val transactionCount = transactionDao.getTransactionCount(startMs, endMs).count
         val monthTransactions = transactionDao.getTransactionsList(startMs, endMs)
+        val filteredMonthTransactions = filterTransactionsByAccount(monthTransactions, accountFilterKey)
+        val summary = buildMonthlySummary(filteredMonthTransactions)
+        val topCategories = buildTopCategories(filteredMonthTransactions)
+        val transactionCount = filteredMonthTransactions.size
+        val accountSummaries = buildAccountSummaries(monthTransactions)
+        val accountFilterOptions = accountSummaries.map {
+            AccountFilterOption(
+                key = it.key,
+                label = it.label,
+                bank = it.bank
+            )
+        }
+        val selectedAccountSummary = accountSummaries.firstOrNull { it.key == accountFilterKey }
 
         val selectedMonth = YearMonth.of(year, month)
         val previousMonth = selectedMonth.minusMonths(1)
-        val previousSummary = getMonthlySummary(previousMonth.year, previousMonth.monthValue)
-        val previousCategories = getTopCategories(previousMonth.year, previousMonth.monthValue)
+        val previousTransactions = getTransactionsForMonth(previousMonth)
+        val previousFilteredTransactions = filterTransactionsByAccount(previousTransactions, accountFilterKey)
+        val previousSummary = buildMonthlySummary(previousFilteredTransactions)
+        val previousCategories = buildTopCategories(previousFilteredTransactions)
         val lastYearMonth = selectedMonth.minusYears(1)
-        val lastYearSummary = getMonthlySummary(lastYearMonth.year, lastYearMonth.monthValue)
-        val recurringTransactions = transactionDao.getTransactionsList(
-            startMs = selectedMonth.minusMonths(5)
-                .atDay(1)
-                .atStartOfDay(ZoneId.systemDefault())
-                .toInstant()
-                .toEpochMilli(),
-            endMs = endMs
+        val lastYearTransactions = getTransactionsForMonth(lastYearMonth)
+        val lastYearSummary = buildMonthlySummary(filterTransactionsByAccount(lastYearTransactions, accountFilterKey))
+        val recurringTransactions = filterTransactionsByAccount(
+            transactionDao.getTransactionsList(
+                startMs = selectedMonth.minusMonths(5)
+                    .atDay(1)
+                    .atStartOfDay(ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli(),
+                endMs = endMs
+            ),
+            accountFilterKey
         )
 
         val daysDivisor = if (selectedMonth == YearMonth.now()) {
@@ -248,6 +303,7 @@ class TransactionRepository(context: Context) {
 
         MonthInsightSnapshot(
             summary = summary,
+            filteredTransactions = filteredMonthTransactions,
             transactionCount = transactionCount,
             averageDailySpend = averageDailySpend,
             topCategories = topCategories,
@@ -258,21 +314,26 @@ class TransactionRepository(context: Context) {
                 previousCategories = previousCategories,
                 averageDailySpend = averageDailySpend,
                 previousAverageDailySpend = previousAverage,
-                monthTransactions = monthTransactions
+                monthTransactions = filteredMonthTransactions
             ),
-            trend = buildTrend(selectedMonth),
-            paymentModes = buildPaymentModes(monthTransactions),
-            topMerchants = buildMerchantAnalytics(monthTransactions),
-            duplicateInsights = buildDuplicateInsights(monthTransactions),
+            trend = buildTrend(selectedMonth, accountFilterKey),
+            paymentModes = buildPaymentModes(filteredMonthTransactions),
+            paymentRails = buildPaymentRails(filteredMonthTransactions),
+            accountFilterOptions = accountFilterOptions,
+            selectedAccountSummary = selectedAccountSummary,
+            accountSummaries = accountSummaries,
+            bankSplit = buildBankSplit(filteredMonthTransactions),
+            topMerchants = buildMerchantAnalytics(filteredMonthTransactions),
+            duplicateInsights = buildDuplicateInsights(filteredMonthTransactions),
             recurringInsights = buildRecurringInsights(recurringTransactions),
-            specialTracking = buildSpecialTracking(monthTransactions),
+            specialTracking = buildSpecialTracking(filteredMonthTransactions),
             budgetProgress = buildBudgetProgress(topCategories),
-            anomalyAlerts = buildAnomalyAlerts(monthTransactions, averageDailySpend),
-            cashflowDays = buildCashflowDays(monthTransactions),
+            anomalyAlerts = buildAnomalyAlerts(filteredMonthTransactions, averageDailySpend),
+            cashflowDays = buildCashflowDays(filteredMonthTransactions),
             compareMetrics = buildCompareMetrics(summary, previousSummary, lastYearSummary),
-            incomeTrend = buildIncomeTrend(monthTransactions),
+            incomeTrend = buildIncomeTrend(filteredMonthTransactions),
             savingsScore = buildSavingsScore(summary, topCategories),
-            rangeSummaries = buildRangeSummaries(selectedMonth)
+            rangeSummaries = buildRangeSummaries(selectedMonth, accountFilterKey)
         )
     }
 
@@ -343,8 +404,7 @@ class TransactionRepository(context: Context) {
         val targetMerchant = MerchantNormalizer.normalize(transaction.merchant, transaction.rawSms)
         val targetMerchantKey = targetMerchant.lowercase(java.util.Locale.ENGLISH)
         val targetAmount = "%.2f".format(java.util.Locale.ENGLISH, transaction.amount)
-        val targetAccount = transaction.accountLabel.ifBlank { transaction.bank }
-            .lowercase(java.util.Locale.ENGLISH)
+        val targetAccount = canonicalAccountKey(transaction).lowercase(java.util.Locale.ENGLISH)
 
         transactionDao.getAllTransactionsList()
             .asSequence()
@@ -353,8 +413,7 @@ class TransactionRepository(context: Context) {
                 val candidateMerchant = MerchantNormalizer.normalize(candidate.merchant, candidate.rawSms)
                 val candidateMerchantKey = candidateMerchant.lowercase(java.util.Locale.ENGLISH)
                 val candidateAmount = "%.2f".format(java.util.Locale.ENGLISH, candidate.amount)
-                val candidateAccount = candidate.accountLabel.ifBlank { candidate.bank }
-                    .lowercase(java.util.Locale.ENGLISH)
+                val candidateAccount = canonicalAccountKey(candidate).lowercase(java.util.Locale.ENGLISH)
 
                 var score = 0
                 if (targetMerchantKey.isNotBlank() && targetMerchantKey != "unknown merchant" && candidateMerchantKey == targetMerchantKey) {
@@ -362,9 +421,9 @@ class TransactionRepository(context: Context) {
                 }
                 if (candidateAmount == targetAmount) score += 3
                 if (candidate.type == transaction.type) score += 2
-                if (targetAccount.isNotBlank() && candidateAccount == targetAccount) score += 1
+                if (targetAccount.isNotBlank() && candidateAccount == targetAccount) score += 4
 
-                if (score >= 5) candidate to score else null
+                if (score >= 7) candidate to score else null
             }
             .sortedWith(
                 compareByDescending<Pair<TransactionEntity, Int>> { it.second }
@@ -423,6 +482,29 @@ class TransactionRepository(context: Context) {
 
     suspend fun ignoreDuplicate(transactionId: Long): Boolean = withContext(Dispatchers.IO) {
         transactionDao.ignoreDuplicate(transactionId) > 0
+    }
+
+    suspend fun mergeAccountLabels(sourceKeys: Set<String>, targetLabel: String): Int = withContext(Dispatchers.IO) {
+        val normalizedTarget = targetLabel.trim()
+        if (sourceKeys.isEmpty() || normalizedTarget.isBlank()) return@withContext 0
+
+        val normalizedKeys = sourceKeys.map { it.trim().lowercase(java.util.Locale.ENGLISH) }.toSet()
+        val now = System.currentTimeMillis()
+        val candidates = transactionDao.getAllTransactionsList()
+            .filter { canonicalAccountKey(it).lowercase(java.util.Locale.ENGLISH) in normalizedKeys }
+            .map { transaction ->
+                transaction.copy(
+                    accountLabel = normalizedTarget,
+                    updatedAt = now
+                )
+            }
+
+        if (candidates.isEmpty()) return@withContext 0
+        val updatedCount = transactionDao.updateAll(candidates)
+        if (updatedCount > 0) {
+            WidgetUpdater.updateAll(appContext)
+        }
+        updatedCount
     }
 
     suspend fun restoreTransaction(transaction: TransactionEntity): Boolean = withContext(Dispatchers.IO) {
@@ -1067,16 +1149,118 @@ class TransactionRepository(context: Context) {
         return start to end
     }
 
-    private suspend fun buildTrend(selectedMonth: YearMonth): List<TrendPoint> {
+    private suspend fun buildTrend(
+        selectedMonth: YearMonth,
+        accountFilterKey: String?
+    ): List<TrendPoint> {
         return (5 downTo 0).map { offset ->
             val yearMonth = selectedMonth.minusMonths(offset.toLong())
-            val summary = getMonthlySummary(yearMonth.year, yearMonth.monthValue)
+            val summary = buildMonthlySummary(
+                filterTransactionsByAccount(getTransactionsForMonth(yearMonth), accountFilterKey)
+            )
             TrendPoint(
                 monthLabel = yearMonth.month.name.take(3).lowercase()
                     .replaceFirstChar { it.uppercase() },
                 expense = summary.totalSpent,
                 income = summary.totalReceived
             )
+        }
+    }
+
+    private fun canonicalAccountKey(transaction: TransactionEntity): String {
+        return transaction.accountLabel
+            .ifBlank { transaction.bank }
+            .ifBlank { "Unknown" }
+            .trim()
+    }
+
+    private fun canonicalBankFamily(transaction: TransactionEntity): String {
+        val source = listOf(transaction.bank, transaction.accountLabel, transaction.sourceSender)
+            .joinToString(" ")
+            .lowercase(java.util.Locale.ENGLISH)
+        return when {
+            "axis" in source -> "Axis"
+            "state bank" in source || Regex("""\bsbi\b""").containsMatchIn(source) -> "SBI"
+            "icici" in source -> "ICICI"
+            "hdfc" in source -> "HDFC"
+            else -> "Other"
+        }
+    }
+
+    private fun paymentRail(transaction: TransactionEntity): String {
+        val label = transaction.accountLabel.lowercase(java.util.Locale.ENGLISH)
+        return when {
+            transaction.paymentMode == "UPI" -> "UPI"
+            transaction.paymentMode == "Bank Transfer" -> "Bank Transfer"
+            transaction.paymentMode == "Card" && "credit" in label -> "Credit Card"
+            else -> "Other"
+        }
+    }
+
+    private fun filterTransactionsByAccount(
+        transactions: List<TransactionEntity>,
+        accountFilterKey: String?
+    ): List<TransactionEntity> {
+        if (accountFilterKey.isNullOrBlank()) return transactions
+        return transactions.filter { canonicalAccountKey(it).equals(accountFilterKey, ignoreCase = true) }
+    }
+
+    private fun buildMonthlySummary(transactions: List<TransactionEntity>): MonthlySummary {
+        return MonthlySummary(
+            totalSpent = transactions.filter { it.type == TransactionType.DEBIT }.sumOf { it.amount },
+            totalReceived = transactions.filter { it.type == TransactionType.CREDIT }.sumOf { it.amount }
+        )
+    }
+
+    private fun buildTopCategories(transactions: List<TransactionEntity>): List<CategoryTotal> {
+        return transactions
+            .filter { it.type == TransactionType.DEBIT }
+            .groupBy { it.category.ifBlank { "Uncategorized" } }
+            .map { (category, items) ->
+                CategoryTotal(category = category, totalAmount = items.sumOf { it.amount })
+            }
+            .sortedByDescending { it.totalAmount }
+            .take(5)
+    }
+
+    private fun buildAccountSummaries(transactions: List<TransactionEntity>): List<AccountSummary> {
+        return transactions
+            .groupBy { canonicalAccountKey(it) }
+            .map { (key, items) ->
+                val latest = items.maxByOrNull { it.timestamp }
+                AccountSummary(
+                    key = key,
+                    label = key,
+                    bank = canonicalBankFamily(latest ?: items.first()),
+                    spent = items.filter { it.type == TransactionType.DEBIT }.sumOf { it.amount },
+                    income = items.filter { it.type == TransactionType.CREDIT }.sumOf { it.amount },
+                    transactionCount = items.size,
+                    latestTimestamp = latest?.timestamp ?: 0L
+                )
+            }
+            .sortedWith(
+                compareByDescending<AccountSummary> { it.spent }
+                    .thenByDescending { it.income }
+                    .thenByDescending { it.latestTimestamp }
+            )
+    }
+
+    private fun buildBankSplit(transactions: List<TransactionEntity>): List<BankSplitSummary> {
+        val grouped = transactions.groupBy { canonicalBankFamily(it) }
+            .map { (bank, items) ->
+                BankSplitSummary(
+                    bank = bank,
+                    spent = items.filter { it.type == TransactionType.DEBIT }.sumOf { it.amount },
+                    income = items.filter { it.type == TransactionType.CREDIT }.sumOf { it.amount },
+                    transactionCount = items.size
+                )
+            }
+            .associateBy { it.bank }
+        val ordered = listOf("Axis", "SBI", "ICICI", "HDFC", "Other").mapNotNull(grouped::get)
+        return if (transactions.size >= 4) {
+            ordered.filter { it.transactionCount > 0 }
+        } else {
+            ordered.filter { it.spent > 0.0 || it.income > 0.0 }
         }
     }
 
@@ -1145,6 +1329,20 @@ class TransactionRepository(context: Context) {
             .sortedByDescending { it.amount }
     }
 
+    private fun buildPaymentRails(transactions: List<TransactionEntity>): List<PaymentRailSummary> {
+        return transactions
+            .filter { it.type == TransactionType.DEBIT }
+            .groupBy { paymentRail(it) }
+            .map { (rail, items) ->
+                PaymentRailSummary(
+                    rail = rail,
+                    amount = items.sumOf { it.amount },
+                    transactionCount = items.size
+                )
+            }
+            .sortedByDescending { it.amount }
+    }
+
     private fun buildMerchantAnalytics(transactions: List<TransactionEntity>): List<MerchantAnalytics> {
         return transactions
             .groupBy { MerchantNormalizer.normalize(it.merchant, it.rawSms) }
@@ -1163,10 +1361,11 @@ class TransactionRepository(context: Context) {
         return transactions
             .filter { !it.isIgnoredDuplicate }
             .groupBy {
-                Triple(
+                listOf(
                     MerchantNormalizer.normalize(it.merchant, it.rawSms),
                     "%.2f".format(java.util.Locale.ENGLISH, it.amount),
-                    it.type
+                    it.type.name,
+                    canonicalAccountKey(it)
                 )
             }
             .mapNotNull { (key, items) ->
@@ -1174,9 +1373,9 @@ class TransactionRepository(context: Context) {
                 val sortedItems = items.sortedByDescending { it.timestamp }
                 val latest = sortedItems.first()
                 DuplicateInsight(
-                    merchant = key.first,
-                    amount = key.second.toDouble(),
-                    type = key.third,
+                    merchant = key[0],
+                    amount = key[1].toDouble(),
+                    type = TransactionType.valueOf(key[2]),
                     transactionIds = sortedItems.map { it.id },
                     transactionCount = sortedItems.size,
                     latestTimestamp = latest.timestamp
@@ -1380,7 +1579,10 @@ class TransactionRepository(context: Context) {
         )
     }
 
-    private suspend fun buildRangeSummaries(selectedMonth: YearMonth): List<RangeSummary> {
+    private suspend fun buildRangeSummaries(
+        selectedMonth: YearMonth,
+        accountFilterKey: String?
+    ): List<RangeSummary> {
         val today = LocalDate.now()
         val ranges = listOf(
             SummaryRangeType.TODAY to (today to today),
@@ -1393,8 +1595,12 @@ class TransactionRepository(context: Context) {
         )
 
         return ranges.map { (type, bounds) ->
-            val summary = getSummaryForRange(bounds.first, bounds.second)
-            val transactionCount = getTransactionCountForRange(bounds.first, bounds.second)
+            val rangeTransactions = filterTransactionsByAccount(
+                getTransactionsForRange(bounds.first, bounds.second),
+                accountFilterKey
+            )
+            val summary = buildMonthlySummary(rangeTransactions)
+            val transactionCount = rangeTransactions.size
             RangeSummary(
                 type = type,
                 label = when (type) {
@@ -1410,18 +1616,16 @@ class TransactionRepository(context: Context) {
         }
     }
 
-    private suspend fun getSummaryForRange(startDate: LocalDate, endDate: LocalDate): MonthlySummary {
-        val zone = ZoneId.systemDefault()
-        val startMs = startDate.atStartOfDay(zone).toInstant().toEpochMilli()
-        val endMs = endDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
-        return transactionDao.getMonthlySummary(startMs, endMs)
+    private suspend fun getTransactionsForMonth(yearMonth: YearMonth): List<TransactionEntity> {
+        val (startMs, endMs) = getMonthRange(yearMonth.year, yearMonth.monthValue)
+        return transactionDao.getTransactionsList(startMs, endMs)
     }
 
-    private suspend fun getTransactionCountForRange(startDate: LocalDate, endDate: LocalDate): Int {
+    private suspend fun getTransactionsForRange(startDate: LocalDate, endDate: LocalDate): List<TransactionEntity> {
         val zone = ZoneId.systemDefault()
         val startMs = startDate.atStartOfDay(zone).toInstant().toEpochMilli()
         val endMs = endDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
-        return transactionDao.getTransactionCount(startMs, endMs).count
+        return transactionDao.getTransactionsList(startMs, endMs)
     }
 
     private fun buildChangeText(current: Double, previous: Double): String {
