@@ -47,6 +47,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AccountBalance
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.rounded.Payments
+import androidx.compose.material.icons.rounded.CreditCard
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
@@ -985,47 +989,102 @@ private fun AccountsOverviewCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             SectionTitle(title = "Accounts")
             if (accountSummaries.isEmpty()) {
                 EmptyStateCard("Account views appear once bank or card labels are available.")
             } else {
-                FilterChip(
-                    selected = selectedKey == null,
-                    onClick = { onSelect(null) },
-                    label = { Text("All accounts") }
-                )
+                if (selectedKey != null) {
+                    androidx.compose.material3.TextButton(
+                        onClick = { onSelect(null) },
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    ) {
+                        Text("Clear filter (Showing selected)")
+                    }
+                }
                 accountSummaries.forEach { account ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable { onSelect(if (selectedKey == account.key) null else account.key) }
                             .background(
                                 if (selectedKey == account.key) {
                                     AccentPurple.copy(alpha = 0.12f)
                                 } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                                    Color.Transparent
                                 }
                             )
-                            .padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .padding(vertical = 10.dp, horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(account.label, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val accountNameLower = account.label.lowercase()
+                            val icon = when {
+                                accountNameLower.contains("cash") -> Icons.Rounded.Payments
+                                accountNameLower.contains("wallet") || accountNameLower.contains("paytm") -> Icons.Rounded.AccountBalanceWallet
+                                accountNameLower.contains("credit") || accountNameLower.contains("card") -> Icons.Rounded.CreditCard
+                                else -> Icons.Rounded.AccountBalance
+                            }
+                            Icon(
+                                imageVector = icon, 
+                                contentDescription = null, 
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant, 
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f), 
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
                             Text(
-                                "${account.transactionCount} transactions · Income ${formatRupees(account.income)}",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = account.label, 
+                                fontWeight = FontWeight.Medium, 
+                                color = MaterialTheme.colorScheme.onSurface, 
+                                maxLines = 1, 
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            
+                            val typeLabel = when {
+                                account.label.contains("credit", ignoreCase = true) -> "Credit Card"
+                                account.label.contains("bank", ignoreCase = true) -> "Bank"
+                                account.label.contains("wallet", ignoreCase = true) || account.label.contains("paytm", ignoreCase = true) -> "Wallet"
+                                account.label.contains("cash", ignoreCase = true) -> "Cash"
+                                else -> "Account"
+                            }
+                            Text(
+                                text = typeLabel, 
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, 
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
-                        Text(
-                            formatRupees(account.spent),
-                            color = AccentPink,
-                            fontWeight = FontWeight.Black
-                        )
+
+                        Column(
+                            horizontalAlignment = Alignment.End, 
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = formatRupees(account.spent),
+                                color = AccentPink,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (account.income > 0) {
+                                Text(
+                                    text = formatRupees(account.income),
+                                    color = AccentTeal,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
                     }
                 }
             }
