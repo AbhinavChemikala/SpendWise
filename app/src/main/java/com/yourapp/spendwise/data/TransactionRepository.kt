@@ -1226,8 +1226,8 @@ class TransactionRepository(context: Context) {
             .map { (category, items) ->
                 CategoryTotal(category = category, totalAmount = items.sumOf { it.amount })
             }
+            .filter { it.totalAmount > 0 }
             .sortedByDescending { it.totalAmount }
-            .take(5)
     }
 
     private fun buildAccountSummaries(transactions: List<TransactionEntity>): List<AccountSummary> {

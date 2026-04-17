@@ -3061,7 +3061,7 @@ private fun InsightsPreviewCard(
     onViewAll: () -> Unit
 ) {
     val chartValues = topCategories.ifEmpty { listOf(CategoryTotal("Other", 1.0)) }
-    val chartColors = donutColors(chartValues.size)
+    val chartBrushes = chartValues.map { categoryGradient(it.category) }
 
     Card(
         modifier = Modifier.clickable { onViewAll() },
@@ -3088,7 +3088,7 @@ private fun InsightsPreviewCard(
                 Box(modifier = Modifier.size(120.dp), contentAlignment = Alignment.Center) {
                     DonutChart(
                         values = chartValues,
-                        colors = chartColors,
+                        brushes = chartBrushes,
                         animate = true
                     )
                 }
@@ -3106,7 +3106,7 @@ private fun InsightsPreviewCard(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Canvas(modifier = Modifier.size(10.dp)) {
-                                drawCircle(color = chartColors[index % chartColors.size])
+                                drawCircle(brush = chartBrushes[index % chartBrushes.size])
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
@@ -3211,7 +3211,7 @@ private fun SectionTitle(
 }
 
 @Composable
-private fun LegendRow(color: Color, label: String, percent: Int) {
+private fun LegendRow(brush: androidx.compose.ui.graphics.Brush, label: String, percent: Int) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -3222,7 +3222,7 @@ private fun LegendRow(color: Color, label: String, percent: Int) {
                 modifier = Modifier
                     .size(10.dp)
                     .clip(CircleShape)
-                    .background(color)
+                    .background(brush = brush)
             )
             Text(text = label, fontWeight = FontWeight.Medium)
         }
@@ -3328,16 +3328,19 @@ private fun SpendingBreakdownCard(totalSpent: Double, topCategories: List<Catego
                 Box(modifier = Modifier.size(132.dp), contentAlignment = Alignment.Center) {
                     DonutChart(
                         values = topCategories.ifEmpty { listOf(CategoryTotal("Other", 1.0)) },
-                        colors = donutColors(topCategories.size)
+                        brushes = (topCategories.ifEmpty { listOf(CategoryTotal("Other", 1.0)) }).map { categoryGradient(it.category) }
                     )
                 }
                 Column(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(max = 140.dp)
+                        .verticalScroll(androidx.compose.foundation.rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     topCategories.ifEmpty { listOf(CategoryTotal("Other", 0.0)) }.forEachIndexed { index, category ->
                         LegendRow(
-                            color = donutColors(topCategories.size)[index % donutColors(topCategories.size).size],
+                            brush = categoryGradient(category.category),
                             label = category.category,
                             percent = if (totalSpent <= 0.0) 0 else ((category.totalAmount / totalSpent) * 100).toInt()
                         )
@@ -3364,7 +3367,7 @@ private fun PaymentModeCard(paymentModes: List<PaymentRailSummary>, totalSpent: 
                 paymentModes.forEach { mode ->
                     val percent = if (totalSpent <= 0.0) 0 else ((mode.amount / totalSpent) * 100).toInt()
                     LegendRow(
-                        color = colorForPaymentMode(mode.rail),
+                        brush = androidx.compose.ui.graphics.SolidColor(colorForPaymentMode(mode.rail)),
                         label = "${mode.rail} • ${mode.transactionCount}",
                         percent = percent
                     )
@@ -6079,7 +6082,7 @@ private fun SegmentedToggle(
 }
 
 @Composable
-private fun DonutChart(values: List<CategoryTotal>, colors: List<Color>, animate: Boolean = true) {
+private fun DonutChart(values: List<CategoryTotal>, brushes: List<androidx.compose.ui.graphics.Brush>, animate: Boolean = true) {
     val total = values.sumOf { it.totalAmount }.takeIf { it > 0.0 } ?: 1.0
 
     val animationProgress = remember { androidx.compose.animation.core.Animatable(0f) }
@@ -6117,7 +6120,7 @@ private fun DonutChart(values: List<CategoryTotal>, colors: List<Color>, animate
             
             if (actualSweep > 0f) {
                 drawArc(
-                    color = colors[index % colors.size],
+                    brush = brushes[index % brushes.size],
                     startAngle = baseAngle,
                     sweepAngle = -actualSweep,
                     useCenter = false,
@@ -6346,6 +6349,23 @@ private fun alertColor(severity: String) = when (severity) {
     "high" -> AccentPink
     "medium" -> AccentAmber
     else -> AccentPurple
+}
+
+private fun categoryGradient(category: String): androidx.compose.ui.graphics.Brush {
+    return when (category.lowercase()) {
+        "food", "food & dining" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFFFF4500), Color(0xFFFF8C00))) // Red-Orange
+        "shopping" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF9400D3), Color(0xFF4B0082))) // Vibrant Violet to Indigo
+        "bills", "bills & utilities" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF00BFFF), Color(0xFF1E90FF))) // Deep Sky Blue to Dodger Blue
+        "travel" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF32CD32), Color(0xFF00FF00))) // Lime Green
+        "rent" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFFA500))) // Gold to Orange
+        "health" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFFFF1493), Color(0xFFFF69B4))) // Deep Pink to Hot Pink
+        "income", "salary", "refunds" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF00FA9A), Color(0xFF00FF7F))) // Medium Spring Green
+        "entertainment" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF00FFFF), Color(0xFF40E0D0))) // Cyan to Turquoise
+        "upi" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF4169E1), Color(0xFF0000CD))) // Royal Blue to Medium Blue
+        "loans & emi" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFFDC143C), Color(0xFFB22222))) // Crimson to Firebrick
+        "gifts & rewards" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFFFF00FF), Color(0xFFDA70D6))) // Magenta to Orchid
+        else -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF8A2BE2), Color(0xFF7B68EE))) // BlueViolet to MediumSlateBlue
+    }
 }
 
 private fun donutColors(count: Int): List<Color> {
