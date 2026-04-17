@@ -35,7 +35,7 @@ internal fun normalizeThemeMode(mode: String): String {
     }
 }
 
-// ── Light palette (warm cream + purple) ──────────────────────────────────────
+// ── Light palette (warm cream + violet) ───────────────────────────────────────
 private val LightColors = lightColorScheme(
     primary            = Color(0xFF6F49FF),
     onPrimary          = Color.White,
@@ -48,17 +48,24 @@ private val LightColors = lightColorScheme(
     outline            = Color(0xFFE3D6CC)
 )
 
-// ── Dark palette (deep slate + same accents) ─────────────────────────────────
+// ── Default Dark palette (deep navy-violet) ────────────────────────────────────
+// Matches the reference screenshots: very dark navy background,
+// slightly lighter card surfaces, violet-purple primary accent.
 private val DarkColors = darkColorScheme(
-    primary            = Color(0xFF9B7FFF),   // lighter purple for dark bg
+    primary            = Color(0xFF7B5CF6),   // violet-purple accent
     onPrimary          = Color(0xFF1A0060),
-    secondary          = Color(0xFF38D4EF),
-    background         = Color(0xFF12111A),   // near-black
-    surface            = Color(0xFF1C1B27),   // dark card bg
-    surfaceVariant     = Color(0xFF242233),   // slightly lighter card
-    onSurface          = Color(0xFFEDE8FF),   // light lavender text
-    onSurfaceVariant   = Color(0xFF9B96B0),   // muted text
-    outline            = Color(0xFF3A3650)    // subtle borders
+    primaryContainer   = Color(0xFF2D1B69),
+    onPrimaryContainer = Color(0xFFCDB9FF),
+    secondary          = Color(0xFF24B6D3),   // teal accent
+    onSecondary        = Color(0xFF003E4A),
+    background         = Color(0xFF0D0D1A),   // very dark navy
+    surface            = Color(0xFF16162A),   // dark card surface
+    surfaceVariant     = Color(0xFF1E1E35),   // slightly lighter variant
+    onSurface          = Color(0xFFEDE8FF),   // off-white lavender text
+    onSurfaceVariant   = Color(0xFF8B86A0),   // muted lavender grey
+    outline            = Color(0xFF2E2C45),   // subtle separator
+    error              = Color(0xFFFF577A),
+    onError            = Color.White
 )
 
 private val AmoledDarkColors = darkColorScheme(
@@ -98,9 +105,9 @@ private val ForestDarkColors = darkColorScheme(
 )
 
 private val SpendWiseShapes = Shapes(
-    small  = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-    medium = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
-    large  = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
+    small  = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    large  = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
 )
 
 @Composable

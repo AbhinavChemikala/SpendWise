@@ -107,6 +107,7 @@ data class DashboardUiState(
     val sparkMailTriggerEnabled: Boolean = false,
     val hasSparkNotificationAccess: Boolean = false,
     val themeMode: String = THEME_MODE_SYSTEM,
+    val legacyThemesEnabled: Boolean = false,
     val dailyReminderEnabled: Boolean = true,
     val dailyReminderHour: Int = 22,
     val dailyReminderMinute: Int = 0,
@@ -318,6 +319,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setLegacyThemesEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setLegacyThemesEnabled(enabled)
+            _uiState.update { it.copy(legacyThemesEnabled = enabled) }
+        }
+    }
+
     fun toggleDebugMode(enabled: Boolean) {
         repository.setDebugModeEnabled(enabled)
         _uiState.update { it.copy(debugModeEnabled = enabled) }
@@ -409,12 +417,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun syncAxisEmailsNow(
         trigger: String = AxisEmailSyncTrigger.MANUAL,
-        silent: Boolean = false
+        silent: Boolean = false,
+        customRangeMs: Pair<Long, Long>? = null
     ) {
         if (_uiState.value.axisEmailAccount.isBlank()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isAxisEmailSyncing = true) }
-            val result = repository.syncAxisEmailsNow(trigger)
+            val result = repository.syncAxisEmailsNow(trigger, customRangeMs)
             _uiState.update {
                 it.copy(
                     isAxisEmailSyncing = false,

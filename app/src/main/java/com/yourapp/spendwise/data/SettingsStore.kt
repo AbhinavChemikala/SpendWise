@@ -123,6 +123,12 @@ class SettingsStore(context: Context) {
         prefs.edit().putString(KEY_THEME_MODE, mode).apply()
     }
 
+    fun isLegacyThemesEnabled(): Boolean = prefs.getBoolean(KEY_LEGACY_THEMES_ENABLED, false)
+
+    fun setLegacyThemesEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_LEGACY_THEMES_ENABLED, enabled).apply()
+    }
+
     fun isDailyReminderEnabled(): Boolean = prefs.getBoolean(KEY_DAILY_REMINDER_ENABLED, true)
 
     fun setDailyReminderEnabled(enabled: Boolean) {
@@ -365,6 +371,7 @@ class SettingsStore(context: Context) {
         private const val KEY_SPARK_MAIL_TRIGGER_ENABLED = "spark_mail_trigger_enabled"
         private const val KEY_SPARK_MAIL_TRIGGER_LAST_SYNC_MS = "spark_mail_trigger_last_sync_ms"
         private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_LEGACY_THEMES_ENABLED = "legacy_themes_enabled"
         private const val KEY_DAILY_REMINDER_ENABLED = "daily_reminder_enabled"
         private const val KEY_DAILY_REMINDER_HOUR = "daily_reminder_hour"
         private const val KEY_DAILY_REMINDER_MINUTE = "daily_reminder_minute"

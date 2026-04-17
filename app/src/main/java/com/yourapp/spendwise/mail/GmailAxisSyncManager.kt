@@ -44,7 +44,8 @@ data class AxisEmailSyncResult(
 )
 
 private data class GmailListResponse(
-    val messages: List<GmailMessageRef> = emptyList()
+    val messages: List<GmailMessageRef> = emptyList(),
+    val nextPageToken: String? = null
 )
 
 private data class GmailMessageRef(
@@ -166,7 +167,8 @@ object GmailAxisSyncManager {
 
     suspend fun syncNow(
         context: Context,
-        trigger: String = AxisEmailSyncTrigger.MANUAL
+        trigger: String = AxisEmailSyncTrigger.MANUAL,
+        customRangeMs: Pair<Long, Long>? = null
     ): AxisEmailSyncResult = withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
         val settings = SettingsStore(appContext)
@@ -223,9 +225,9 @@ object GmailAxisSyncManager {
         val lastSyncMs = settings.getAxisEmailLastSyncMs()
         var recentMessageIds = settings.getAxisEmailRecentMessageIds().toMutableList()
         val recentIdSet = recentMessageIds.toMutableSet()
-        val messageIds = listMessageIds(accessToken, lastSyncMs)
+        val messageIds = listMessageIds(accessToken, lastSyncMs, customRangeMs)
         if (messageIds.isEmpty()) {
-            settings.setAxisEmailLastSyncMs(System.currentTimeMillis())
+            if (customRangeMs == null) settings.setAxisEmailLastSyncMs(System.currentTimeMillis())
             val result = AxisEmailSyncResult(message = "No new Axis emails found.")
             settings.appendAxisEmailSyncHistory(
                 buildHistoryEntry(
@@ -251,7 +253,8 @@ object GmailAxisSyncManager {
         var maxSeenTimestamp = lastSyncMs
 
         messageIds.forEach { messageId ->
-            if (!recentIdSet.add(messageId)) {
+            val isNewlyAdded = recentIdSet.add(messageId)
+            if (customRangeMs == null && !isNewlyAdded) {
                 return@forEach
             }
             scanned += 1
@@ -367,7 +370,9 @@ object GmailAxisSyncManager {
             recentMessageIds = recentIdSet.toList().takeLast(200).toMutableList()
             settings.setAxisEmailRecentMessageIds(recentMessageIds)
         }
-        settings.setAxisEmailLastSyncMs(maxOf(maxSeenTimestamp, System.currentTimeMillis()))
+        if (customRangeMs == null) {
+            settings.setAxisEmailLastSyncMs(maxOf(maxSeenTimestamp, System.currentTimeMillis()))
+        }
 
         val result = AxisEmailSyncResult(
             scanned = scanned,
@@ -394,30 +399,54 @@ object GmailAxisSyncManager {
         result
     }
 
-    private fun listMessageIds(accessToken: String, lastSyncMs: Long): List<String> {
-        val afterSeconds = ((if (lastSyncMs > 0L) lastSyncMs else System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)) / 1000L) - 3600L
-        val url = "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${java.net.URLEncoder.encode("$QUERY_SENDER after:$afterSeconds", "UTF-8")}&maxResults=$MAX_MESSAGES_PER_SYNC"
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("Authorization", "Bearer $accessToken")
-            .build()
-        return runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "Gmail list failed ${response.code}")
-                    emptyList()
-                } else {
-                    val body = response.body?.string().orEmpty()
-                    gson.fromJson(body, GmailListResponse::class.java)
-                        ?.messages
-                        .orEmpty()
-                        .mapNotNull { it.id.takeIf(String::isNotBlank) }
+    private fun listMessageIds(accessToken: String, lastSyncMs: Long, customRangeMs: Pair<Long, Long>? = null): List<String> {
+        val query = if (customRangeMs != null) {
+            val afterSeconds = customRangeMs.first / 1000L
+            val beforeSeconds = customRangeMs.second / 1000L
+            "$QUERY_SENDER after:$afterSeconds before:$beforeSeconds"
+        } else {
+            val afterSeconds = ((if (lastSyncMs > 0L) lastSyncMs else System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)) / 1000L) - 3600L
+            "$QUERY_SENDER after:$afterSeconds"
+        }
+        val maxResults = if (customRangeMs != null) 500L else MAX_MESSAGES_PER_SYNC
+        
+        val messageIds = mutableListOf<String>()
+        var pageToken: String? = null
+        
+        do {
+            var url = "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${java.net.URLEncoder.encode(query, "UTF-8")}&maxResults=$maxResults"
+            if (pageToken != null) {
+                url += "&pageToken=$pageToken"
+            }
+            
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $accessToken")
+                .build()
+                
+            val result = runCatching {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "Gmail list failed ${response.code}")
+                        pageToken = null
+                    } else {
+                        val body = response.body?.string().orEmpty()
+                        val listResponse = gson.fromJson(body, GmailListResponse::class.java)
+                        listResponse?.messages?.forEach { ref ->
+                            if (ref.id.isNotBlank()) messageIds.add(ref.id)
+                        }
+                        pageToken = if (customRangeMs != null) listResponse?.nextPageToken else null
+                    }
                 }
             }
-        }.getOrElse {
-            Log.e(TAG, "Unable to list Gmail messages", it)
-            emptyList()
-        }
+            
+            if (result.isFailure) {
+                Log.e(TAG, "Unable to list Gmail messages", result.exceptionOrNull())
+                pageToken = null
+            }
+        } while (pageToken != null)
+        
+        return messageIds
     }
 
     private fun fetchMessage(accessToken: String, messageId: String): GmailMessageResponse? {

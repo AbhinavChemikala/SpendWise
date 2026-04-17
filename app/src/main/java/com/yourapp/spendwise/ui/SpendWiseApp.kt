@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -72,22 +73,42 @@ import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.Fastfood
+import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material.icons.rounded.SportsEsports
+import androidx.compose.material.icons.rounded.RealEstateAgent
+import androidx.compose.material.icons.rounded.FlightTakeoff
+import androidx.compose.material.icons.rounded.CardGiftcard
+import androidx.compose.material.icons.rounded.TrendingUp
+import androidx.compose.material.icons.rounded.Work
+import androidx.compose.material.icons.rounded.SettingsBackupRestore
+import androidx.compose.material.icons.rounded.Atm
+import androidx.compose.material.icons.rounded.Toll
+import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Button
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
@@ -190,11 +211,11 @@ import java.util.Locale
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.flow.distinctUntilChanged
 
-internal val AccentPink = Color(0xFFFF577A)
-internal val AccentTeal = Color(0xFF24B6D3)
-internal val AccentPurple = Color(0xFF6F49FF)
-internal val AccentGreen = Color(0xFF2E8B57)
-internal val AccentAmber = Color(0xFFF5A623)
+internal val AccentPink   = Color(0xFFFF577A)
+internal val AccentTeal   = Color(0xFF2DD4BF)
+internal val AccentPurple = Color(0xFF7B5CF6)
+internal val AccentGreen  = Color(0xFF22C55E)
+internal val AccentAmber  = Color(0xFFF59E0B)
 private val SpendWiseUiGson = Gson()
 
 private data class DebugSmsTemplate(
@@ -507,10 +528,23 @@ fun SpendWiseApp(vm: MainViewModel) {
         floatingActionButton = {
             FloatingActionButton(
                 onClick = vm::openManualAddDialog,
-                containerColor = AccentPurple,
-                contentColor = Color.White
+                containerColor = Color.Transparent,
+                contentColor = Color.White,
+                shape = CircleShape,
+                elevation = androidx.compose.material3.FloatingActionButtonDefaults.elevation(0.dp)
             ) {
-                Icon(Icons.Rounded.Add, contentDescription = "Add transaction")
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(
+                            brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                colors = listOf(AccentPurple, AccentPink)
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Add transaction", modifier = Modifier.size(24.dp))
+                }
             }
         },
         bottomBar = {
@@ -622,6 +656,9 @@ fun SpendWiseApp(vm: MainViewModel) {
                     },
                     onToggleAxisEmailAutoSync = vm::toggleAxisEmailAutoSync,
                     onSyncAxisEmails = { vm.syncAxisEmailsNow(trigger = AxisEmailSyncTrigger.MANUAL) },
+                    onSyncAxisEmailsCustomRange = { startMs, endMs ->
+                        vm.syncAxisEmailsNow(trigger = AxisEmailSyncTrigger.MANUAL, customRangeMs = Pair(startMs, endMs))
+                    },
                     onToggleSparkMailTrigger = vm::toggleSparkMailTrigger,
                     onOpenSparkNotificationAccess = {
                         vm.refreshNotificationAccessState()
@@ -629,6 +666,7 @@ fun SpendWiseApp(vm: MainViewModel) {
                     },
                     onRecoverLegacyAiFailures = vm::recoverLegacyAiFailures,
                     onSetThemeMode = vm::setThemeMode,
+                    onToggleLegacyThemes = vm::setLegacyThemesEnabled,
                     onToggleDailyReminder = vm::toggleDailyReminder,
                     onSetDailyReminderTime = vm::setDailyReminderTime,
                     onExportLocalBackup = {
@@ -1083,8 +1121,8 @@ private fun ActivityScreen(
     ) {
         item {
             ScreenHeader(
-                title = "Transactions",
-                subtitle = "Track every debit and credit",
+                title = "Activity",
+                subtitle = "",
                 monthLabel = formatMonth(uiState.selectedYear, uiState.selectedMonth),
                 onMonthClick = onMonthClick
             )
@@ -1102,8 +1140,33 @@ private fun ActivityScreen(
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                label = { Text("Search transactions") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) }
+                shape = RoundedCornerShape(16.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                ),
+                placeholder = { Text("Search transactions...", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                trailingIcon = {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+                            .clickable { showAdvancedFilters = !showAdvancedFilters }
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.FilterList,
+                            contentDescription = "Filters",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             )
         }
         item {
@@ -1125,15 +1188,51 @@ private fun ActivityScreen(
         if (filteredTransactions.isEmpty()) {
             item { EmptyStateCard("No transactions match this view yet.") }
         } else {
-            items(filteredTransactions, key = { it.id }) { transaction ->
-                TransactionListItem(
-                    transaction = transaction,
-                    onDeleteRequest = { onDeleteTransaction(transaction) },
-                    onEditRequest = { onEditTransaction(transaction) },
-                    onOpenRequest = { onOpenTransaction(transaction) },
-                    onRemoveDuplicateRequest = { onRemoveDuplicateRequest(transaction) },
-                    isLikelyDuplicate = transaction.id in uiState.duplicateTransactionIds
-                )
+            val groupedByDate = filteredTransactions.groupBy { transaction ->
+                val date = java.time.Instant.ofEpochMilli(transaction.timestamp)
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .toLocalDate()
+                val formatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMM", Locale.ENGLISH)
+                date.format(formatter)
+            }
+            
+            groupedByDate.forEach { (dateStr, groupTxns) ->
+                item {
+                    Text(
+                        text = dateStr,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)
+                    )
+                }
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    ) {
+                        Column {
+                            groupTxns.forEachIndexed { index, transaction ->
+                                TransactionListItem(
+                                    transaction = transaction,
+                                    onDeleteRequest = { onDeleteTransaction(transaction) },
+                                    onEditRequest = { onEditTransaction(transaction) },
+                                    onOpenRequest = { onOpenTransaction(transaction) },
+                                    onRemoveDuplicateRequest = { onRemoveDuplicateRequest(transaction) },
+                                    isLikelyDuplicate = transaction.id in uiState.duplicateTransactionIds,
+                                    containerColor = Color.Transparent,
+                                    shape = RoundedCornerShape(0.dp)
+                                )
+                                if (index < groupTxns.lastIndex) {
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
+                                        modifier = Modifier.padding(horizontal = 14.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1230,10 +1329,12 @@ private fun SettingsScreen(
     onDisconnectAxisEmail: () -> Unit,
     onToggleAxisEmailAutoSync: (Boolean) -> Unit,
     onSyncAxisEmails: () -> Unit,
+    onSyncAxisEmailsCustomRange: (Long, Long) -> Unit,
     onToggleSparkMailTrigger: (Boolean) -> Unit,
     onOpenSparkNotificationAccess: () -> Unit,
     onRecoverLegacyAiFailures: () -> Unit,
     onSetThemeMode: (String) -> Unit,
+    onToggleLegacyThemes: (Boolean) -> Unit,
     onToggleDailyReminder: (Boolean) -> Unit,
     onSetDailyReminderTime: (Int, Int) -> Unit,
     onExportLocalBackup: () -> Unit,
@@ -1249,18 +1350,42 @@ private fun SettingsScreen(
     onSimulateTemplate: (DebugSmsTemplate) -> Unit,
     onSendTemplate: (DebugSmsTemplate) -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showCategoryDialog by rememberSaveable { mutableStateOf(false) }
     var editingRule by remember { mutableStateOf<TransactionRule?>(null) }
     var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
     var showEmailSyncHistory by rememberSaveable { mutableStateOf(false) }
+    var showCustomDateRangeDialog by rememberSaveable { mutableStateOf(false) }
     var showBackupHistory by rememberSaveable { mutableStateOf(false) }
+
+    if (showCustomDateRangeDialog) {
+        CustomDateRangeDialog(
+            onDismiss = { showCustomDateRangeDialog = false },
+            onConfirm = { start, end ->
+                showCustomDateRangeDialog = false
+                onSyncAxisEmailsCustomRange(start, end)
+            }
+        )
+    }
     var showAccountMergeDialog by rememberSaveable { mutableStateOf(false) }
     var showLocalRestoreConfirm by rememberSaveable { mutableStateOf(false) }
     var showDriveRestoreConfirm by rememberSaveable { mutableStateOf(false) }
+    
+    // Expandable states
     var showReviewCenter by rememberSaveable { mutableStateOf(false) }
     var showSpamInbox by rememberSaveable { mutableStateOf(false) }
     var showDebugConsole by rememberSaveable { mutableStateOf(false) }
     var showSourceExplorer by rememberSaveable { mutableStateOf(false) }
+
+    var expandedTheme by rememberSaveable { mutableStateOf(false) }
+    var expandedAiKey by rememberSaveable { mutableStateOf(false) }
+    var expandedDrive by rememberSaveable { mutableStateOf(false) }
+    var expandedAxis by rememberSaveable { mutableStateOf(false) }
+    var expandedDailyReminder by rememberSaveable { mutableStateOf(false) }
+    
+    var keyText by remember { mutableStateOf(uiState.cloudAiApiKey) }
+    var showKey by remember { mutableStateOf(false) }
+
     val baseThemeOptions = listOf(
         THEME_MODE_SYSTEM to "System",
         THEME_MODE_LIGHT to "Light"
@@ -1275,10 +1400,7 @@ private fun SettingsScreen(
     if (showCategoryDialog) {
         CategoryEditorDialog(
             onDismiss = { showCategoryDialog = false },
-            onSave = {
-                onAddCategory(it)
-                showCategoryDialog = false
-            }
+            onSave = { onAddCategory(it); showCategoryDialog = false }
         )
     }
 
@@ -1311,10 +1433,7 @@ private fun SettingsScreen(
         RestoreBackupConfirmDialog(
             source = "a local backup file",
             onDismiss = { showLocalRestoreConfirm = false },
-            onConfirm = {
-                showLocalRestoreConfirm = false
-                onRestoreLocalBackup()
-            }
+            onConfirm = { showLocalRestoreConfirm = false; onRestoreLocalBackup() }
         )
     }
 
@@ -1322,10 +1441,7 @@ private fun SettingsScreen(
         RestoreBackupConfirmDialog(
             source = "Google Drive",
             onDismiss = { showDriveRestoreConfirm = false },
-            onConfirm = {
-                showDriveRestoreConfirm = false
-                onRestoreBackupFromDrive()
-            }
+            onConfirm = { showDriveRestoreConfirm = false; onRestoreBackupFromDrive() }
         )
     }
 
@@ -1333,10 +1449,7 @@ private fun SettingsScreen(
         RuleEditorDialog(
             initialRule = rule,
             onDismiss = { editingRule = null },
-            onSave = {
-                onSaveRule(it)
-                editingRule = null
-            }
+            onSave = { onSaveRule(it); editingRule = null }
         )
     }
 
@@ -1344,441 +1457,283 @@ private fun SettingsScreen(
         BudgetEditorDialog(
             availableCategories = availableCategories(uiState.customCategories, uiState.transactions),
             onDismiss = { showBudgetDialog = false },
-            onSave = { category, amount ->
-                onSaveBudget(category, amount)
-                showBudgetDialog = false
-            }
+            onSave = { category, amount -> onSaveBudget(category, amount); showBudgetDialog = false }
         )
     }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            ScreenHeader(
-                title = "Settings",
-                subtitle = "Control testing and preferences"
+            Text(
+                "Settings",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(bottom = 8.dp)
             )
         }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("Notifications", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = "SpendWise sends alerts for instant detections and keeps AI-review items visible until they are confirmed or dismissed.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-        item {
-            DailyReminderCard(
-                enabled = uiState.dailyReminderEnabled,
-                hour = uiState.dailyReminderHour,
-                minute = uiState.dailyReminderMinute,
-                onToggle = onToggleDailyReminder,
-                onTimeChange = onSetDailyReminderTime
-            )
-        }
-        item {
-            BackupSettingsCard(
-                driveAccount = uiState.driveBackupAccount,
-                driveAutoEnabled = uiState.driveBackupAutoEnabled,
-                driveHour = uiState.driveBackupHour,
-                driveMinute = uiState.driveBackupMinute,
-                history = uiState.backupHistory,
-                isBusy = uiState.isBackupBusy,
-                onExportLocal = onExportLocalBackup,
-                onRestoreLocal = { showLocalRestoreConfirm = true },
-                onConnectDrive = onConnectDriveBackup,
-                onDisconnectDrive = onDisconnectDriveBackup,
-                onToggleDriveAuto = onToggleDriveBackupAuto,
-                onDriveTimeChange = onSetDriveBackupTime,
-                onPushDrive = onPushBackupToDrive,
-                onRestoreDrive = { showDriveRestoreConfirm = true },
-                onOpenHistory = { showBackupHistory = true }
-            )
-        }
-        // ── Theme Toggle ────────────────────────────────────────────────────────
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("App Theme", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "Mode",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        baseThemeOptions.forEach { (mode, label) ->
-                            FilterChip(
-                                selected = uiState.themeMode == mode,
-                                onClick = { onSetThemeMode(mode) },
-                                label = { Text(label) }
-                            )
-                        }
-                    }
-                    Text(
-                        "Dark themes",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        darkThemeOptions.forEach { (mode, label) ->
-                            FilterChip(
-                                selected = uiState.themeMode == mode,
-                                onClick = { onSetThemeMode(mode) },
-                                label = { Text(label) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Use Nano for AI Review", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = "Allow Gemini Nano to process and evaluate SMS locally on your device. Turning this off directly adds messages without AI review.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = uiState.isAiReviewEnabled,
-                            onCheckedChange = onToggleAiReview
-                        )
-                    }
-                }
-            }
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("Legacy AI recovery", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = "Scan older AI review items that were marked rejected because the model timed out or returned nothing, and convert them into retryable failures.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(
-                            onClick = onRecoverLegacyAiFailures,
-                            enabled = !uiState.isScanningLegacyAiFailures
-                        ) {
-                            if (uiState.isScanningLegacyAiFailures) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Scanning")
-                            } else {
-                                Text("Scan once")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Axis Email Sync", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = "Read Axis Bank alert emails from Gmail, skip them when a matching SMS already exists, and send the rest through the same AI pipeline as SMS.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
 
-                    if (uiState.axisEmailAccount.isBlank()) {
-                        TextButton(
-                            onClick = onConnectAxisEmail,
-                            modifier = Modifier.align(Alignment.End)
-                        ) {
-                            Text("Connect Gmail")
-                        }
-                    } else {
-                        Text(
-                            text = "Connected: ${uiState.axisEmailAccount}",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Medium
+        // ── PROFILE ──────────────────────────────────────────────────
+        item { SettingsSectionHeader("PROFILE") }
+        item {
+            val account = com.google.android.gms.auth.api.signin.GoogleSignIn.getLastSignedInAccount(context)
+            val displayName = account?.displayName ?: "SpendWise User"
+            val displayEmail = account?.email ?: "Tap to connect account"
+            val initial = displayName.firstOrNull()?.uppercase() ?: "S"
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.clickable {
+                    if (account == null) onConnectDriveBackup()
+                }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.AccountBalanceWallet,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            text = if (uiState.axisEmailLastSyncMs > 0L) {
-                                "Last checked ${formatDate(uiState.axisEmailLastSyncMs)}"
-                            } else {
-                                "No Axis email sync has run yet."
-                            },
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Auto-check Axis emails", fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    text = "SpendWise polls Gmail on-device every few minutes using WorkManager.",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = uiState.axisEmailAutoSyncEnabled,
-                                onCheckedChange = onToggleAxisEmailAutoSync
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            TextButton(
-                                onClick = onSyncAxisEmails,
-                                enabled = !uiState.isAxisEmailSyncing
-                            ) {
-                                if (uiState.isAxisEmailSyncing) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Syncing")
-                                } else {
-                                    Text("Sync now")
-                                }
-                            }
-                            TextButton(onClick = onDisconnectAxisEmail) {
-                                Text("Disconnect")
-                            }
-                        }
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                            Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Spark notifications trigger sync", fontWeight = FontWeight.SemiBold)
-                                        Text(
-                                            text = "Optional. When Spark Mail posts an Axis-looking notification, SpendWise immediately starts a Gmail sync.",
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Switch(
-                                        checked = uiState.sparkMailTriggerEnabled,
-                                        onCheckedChange = onToggleSparkMailTrigger
-                                    )
-                                }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = if (uiState.hasSparkNotificationAccess) {
-                                            "Notification access granted"
-                                        } else {
-                                            "Notification access required"
-                                        },
-                                        color = if (uiState.hasSparkNotificationAccess) AccentGreen else AccentAmber,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    TextButton(onClick = onOpenSparkNotificationAccess) {
-                                        Text(if (uiState.hasSparkNotificationAccess) "Manage access" else "Grant access")
-                                    }
-                                }
-                            }
-                        }
                     }
-                    if (uiState.axisEmailAccount.isNotBlank() || uiState.axisEmailSyncHistory.isNotEmpty()) {
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(displayName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        Text(displayEmail, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (account?.photoUrl != null) {
+                        coil.compose.AsyncImage(
+                            model = account.photoUrl,
+                            contentDescription = null,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showEmailSyncHistory = true }
+                                .size(38.dp)
+                                .clip(CircleShape)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(AccentPurple), 
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(14.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Email sync history", fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        text = uiState.axisEmailSyncHistory.firstOrNull()?.let { latest ->
-                                            "${AxisEmailSyncTrigger.label(latest.trigger)} · ${formatDate(latest.startedAt)} · ${latest.message}"
-                                        } ?: "See manual, periodic, and mail-notification sync runs in one place.",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Rounded.ReceiptLong,
-                                    contentDescription = "Open email sync history",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Text(initial, color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
         }
+
+        // ── PREFERENCES ──────────────────────────────────────────────
+        item { SettingsSectionHeader("PREFERENCES") }
         item {
-            var keyText by remember { mutableStateOf(uiState.cloudAiApiKey) }
-            var showKey by remember { mutableStateOf(false) }
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Use Gemma 3 27B (Cloud AI)", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = "Google’s Gemma 3 27B via AI Studio API — primary engine, falls back to Nano when offline. Free 14,400 req/day.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column {
+                    SettingsSwitchRow(
+                        icon = Icons.Rounded.Psychology,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Dark Mode",
+                        subtitle = "Currently ${if (uiState.themeMode.contains("dark", true)) "dark" else "light"}",
+                        checked = uiState.themeMode.contains("dark", true),
+                        onCheckedChange = { isDark ->
+                            onSetThemeMode(if (isDark) THEME_MODE_DARK else THEME_MODE_LIGHT)
+                        }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.Search,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Currency",
+                        subtitle = "₹ Indian Rupee (INR)",
+                        onClick = { /* mock */ }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.Search,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Notifications",
+                        subtitle = "Push & email alerts",
+                        onClick = { expandedDailyReminder = !expandedDailyReminder }
+                    )
+                    if (expandedDailyReminder) {
+                        Box(modifier = Modifier.padding(16.dp)) {
+                            DailyReminderCard(
+                                enabled = uiState.dailyReminderEnabled,
+                                hour = uiState.dailyReminderHour,
+                                minute = uiState.dailyReminderMinute,
+                                onToggle = onToggleDailyReminder,
+                                onTimeChange = onSetDailyReminderTime
                             )
                         }
-                        Switch(
-                            checked = uiState.isCloudAiEnabled,
-                            onCheckedChange = { onToggleCloudAi(it) }
-                        )
                     }
-                    if (uiState.isCloudAiEnabled) {
-                        Text("Google AI Studio API Key", fontWeight = FontWeight.Medium)
-                        OutlinedTextField(
-                            value = keyText,
-                            onValueChange = { keyText = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("AIza...") },
-                            singleLine = true,
-                            visualTransformation = if (showKey) VisualTransformation.None
-                                else PasswordVisualTransformation(),
-                            trailingIcon = {
-                                IconButton(onClick = { showKey = !showKey }) {
-                                    Icon(
-                                        if (showKey) Icons.Rounded.VisibilityOff
-                                        else Icons.Rounded.Visibility,
-                                        contentDescription = if (showKey) "Hide" else "Show"
-                                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.Edit,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "App Theme Engine",
+                        subtitle = "Change base theme mode and legacy options",
+                        onClick = { expandedTheme = !expandedTheme }
+                    )
+                    if (expandedTheme) {
+                        Column(modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                Text("Legacy Themes", style = MaterialTheme.typography.bodySmall)
+                                Switch(checked = uiState.legacyThemesEnabled, onCheckedChange = onToggleLegacyThemes, modifier = Modifier.scale(0.8f))
+                            }
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                baseThemeOptions.forEach { (mode, label) ->
+                                    FilterChip(selected = uiState.themeMode == mode, onClick = { onSetThemeMode(mode) }, label = { Text(label) })
                                 }
                             }
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.End,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            TextButton(onClick = { onUpdateCloudAiApiKey(keyText) }) {
-                                Text("Save Key")
+                            if (uiState.legacyThemesEnabled) {
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    darkThemeOptions.forEach { (mode, label) ->
+                                        FilterChip(selected = uiState.themeMode == mode, onClick = { onSetThemeMode(mode) }, label = { Text(label) })
+                                    }
+                                }
                             }
                         }
-                        Text(
-                            text = "🔗 Get free API key: aistudio.google.com → Get API Key",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
         }
+
+        // ── AI CONFIGURATION ─────────────────────────────────────────
+        item { SettingsSectionHeader("AI CONFIGURATION") }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text("Import existing SMS", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = "Scan the SMS inbox on this device and pull in older bank alerts, UPI spends, and credits using the same offline pipeline.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column {
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.Psychology,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "AI Model",
+                        subtitle = "Gemma 3 27B (Primary) + Nano (Fallback)",
+                        onClick = { onToggleCloudAi(!uiState.isCloudAiEnabled) }
                     )
-                    TextButton(
-                        onClick = onScanExistingSms,
-                        enabled = !uiState.isImportingSms
-                    ) {
-                        Icon(Icons.Rounded.Search, contentDescription = null)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (uiState.isImportingSms) "Scanning messages..." else "Scan device messages")
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.Psychology,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "API Key",
+                        subtitle = if (uiState.cloudAiApiKey.isBlank()) "Not configured" else "****" + uiState.cloudAiApiKey.takeLast(4),
+                        onClick = { expandedAiKey = !expandedAiKey }
+                    )
+                    if (expandedAiKey) {
+                        Column(modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 16.dp)) {
+                            OutlinedTextField(
+                                value = keyText,
+                                onValueChange = { keyText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("AIza...") },
+                                singleLine = true,
+                                trailingIcon = { IconButton(onClick = { showKey = !showKey }) { Icon(if (showKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, null) } },
+                                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation()
+                            )
+                            Button(onClick = { onUpdateCloudAiApiKey(keyText); expandedAiKey = false }, modifier = Modifier.align(Alignment.End).padding(top = 8.dp)) { Text("Save Key") }
+                        }
                     }
-                    if (uiState.isImportingSms) {
-                        val progress = uiState.importProgress
-                        val total = progress.second.coerceAtLeast(1)
-                        LinearProgressIndicator(
-                            progress = { progress.first.toFloat() / total.toFloat() },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = AccentTeal,
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        Text(
-                            text = "${progress.first} / ${progress.second} messages scanned",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.Replay,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Legacy Re-scan",
+                        subtitle = if (uiState.isScanningLegacyAiFailures) "Scanning..." else "Recover failed parses",
+                        onClick = { if (!uiState.isScanningLegacyAiFailures) onRecoverLegacyAiFailures() }
+                    )
+                }
+            }
+        }
+
+        // ── ACCOUNTS ─────────────────────────────────────────────────
+        item { SettingsSectionHeader("ACCOUNTS") }
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column {
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.AccountBalanceWallet,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Linked Accounts",
+                        subtitle = "${uiState.accountSummaries.size} active accounts",
+                        onClick = { showAccountMergeDialog = true }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.ChatBubbleOutline,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Axis Email Check",
+                        subtitle = if (uiState.axisEmailAccount.isBlank()) "Not connected" else "Checking via ${uiState.axisEmailAccount}",
+                        onClick = { expandedAxis = !expandedAxis }
+                    )
+                    if (expandedAxis) {
+                        Column(modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 16.dp)) {
+                            if (uiState.axisEmailAccount.isBlank()) {
+                                Button(onClick = onConnectAxisEmail) { Text("Connect Gmail") }
+                            } else {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Auto-check", style = MaterialTheme.typography.bodySmall)
+                                    Switch(checked = uiState.axisEmailAutoSyncEnabled, onCheckedChange = onToggleAxisEmailAutoSync, modifier = Modifier.scale(0.8f))
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Spark App Trigger", style = MaterialTheme.typography.bodySmall)
+                                    Switch(checked = uiState.sparkMailTriggerEnabled, onCheckedChange = onToggleSparkMailTrigger, modifier = Modifier.scale(0.8f))
+                                }
+                                if (uiState.sparkMailTriggerEnabled && !uiState.hasSparkNotificationAccess) {
+                                    TextButton(onClick = onOpenSparkNotificationAccess) { Text("Grant Notification Access") }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { showEmailSyncHistory = true }) { Text("History") }
+                                    Row {
+                                        TextButton(onClick = { showCustomDateRangeDialog = true }, enabled = !uiState.isAxisEmailSyncing) { Text("Custom Date") }
+                                        TextButton(onClick = onSyncAxisEmails, enabled = !uiState.isAxisEmailSyncing) { Text(if (uiState.isAxisEmailSyncing) "Syncing" else "Sync now") }
+                                    }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    TextButton(onClick = onDisconnectAxisEmail) { Text("Disconnect") }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
+
+        // ── ORGANIZATION & RULES ─────────────────────────────────────
+        item { SettingsSectionHeader("ORGANIZATION & RULES") }
         item {
             CategoryManagementCard(
                 categories = uiState.customCategories,
                 onAddCategory = { showCategoryDialog = true },
                 onRemoveCategory = onRemoveCategory
-            )
-        }
-        item {
-            AccountLabelManagementCard(
-                accountSummaries = uiState.accountSummaries,
-                onOpenMergeDialog = { showAccountMergeDialog = true }
             )
         }
         item {
@@ -1797,108 +1752,249 @@ private fun SettingsScreen(
                 onDeleteBudget = onDeleteBudget
             )
         }
+
+        // ── DATA & SYSTEM ────────────────────────────────────────────
+        item { SettingsSectionHeader("DATA & SYSTEM") }
         item {
-            ExpandableReviewCard(
-                title = "Review center",
-                subtitle = "See queued and AI-reviewed SMS decisions.",
-                items = uiState.reviewCenterItems,
-                expanded = showReviewCenter,
-                onToggle = { showReviewCenter = !showReviewCenter }
-            )
-        }
-        item {
-            ExpandableReviewCard(
-                title = "Spam inbox",
-                subtitle = "Suspicious or rejected SMS kept for manual inspection.",
-                items = uiState.spamInboxItems,
-                expanded = showSpamInbox,
-                onToggle = { showSpamInbox = !showSpamInbox }
-            )
-        }
-        item {
-            ExpandableReviewCard(
-                title = "Debug console",
-                subtitle = "Regex, pre-filter, AI output, and final pipeline decisions.",
-                items = uiState.debugConsoleItems,
-                expanded = showDebugConsole,
-                onToggle = { showDebugConsole = !showDebugConsole }
-            )
-        }
-        item {
-            ExpandableReviewCard(
-                title = "SMS source explorer",
-                subtitle = "Imported SMS and whether each one was added, queued, skipped, or rejected.",
-                items = uiState.importSourceItems,
-                expanded = showSourceExplorer,
-                onToggle = { showSourceExplorer = !showSourceExplorer }
-            )
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Debug mode", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = "Enable template-driven SMS testing tools.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column {
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.Search,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Backups",
+                        subtitle = "Drive & Local storage",
+                        onClick = { expandedDrive = !expandedDrive }
+                    )
+                    if (expandedDrive) {
+                        Box(modifier = Modifier.padding(16.dp)) {
+                            BackupSettingsCard(
+                                driveAccount = uiState.driveBackupAccount,
+                                driveAutoEnabled = uiState.driveBackupAutoEnabled,
+                                driveHour = uiState.driveBackupHour,
+                                driveMinute = uiState.driveBackupMinute,
+                                history = uiState.backupHistory,
+                                isBusy = uiState.isBackupBusy,
+                                onExportLocal = onExportLocalBackup,
+                                onRestoreLocal = { showLocalRestoreConfirm = true },
+                                onConnectDrive = onConnectDriveBackup,
+                                onDisconnectDrive = onDisconnectDriveBackup,
+                                onToggleDriveAuto = onToggleDriveBackupAuto,
+                                onDriveTimeChange = onSetDriveBackupTime,
+                                onPushDrive = onPushBackupToDrive,
+                                onRestoreDrive = { showDriveRestoreConfirm = true },
+                                onOpenHistory = { showBackupHistory = true }
                             )
                         }
-                        Switch(
-                            checked = uiState.debugModeEnabled,
-                            onCheckedChange = onToggleDebug
-                        )
                     }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    SettingsArrowRow(
+                        icon = Icons.Rounded.Search,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Import SMS",
+                        subtitle = if (uiState.isImportingSms) "Scanning..." else "Scan inbox historically",
+                        onClick = onScanExistingSms
+                    )
+                }
+            }
+        }
 
+        // ── DEVELOPER OPTIONS ────────────────────────────────────────
+        item { SettingsSectionHeader("DEVELOPER OPTIONS") }
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column {
+                    SettingsSwitchRow(
+                        icon = Icons.Rounded.Edit,
+                        iconBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Debug Mode",
+                        subtitle = "Enable template tools",
+                        checked = uiState.debugModeEnabled,
+                        onCheckedChange = onToggleDebug
+                    )
                     if (uiState.debugModeEnabled) {
-                        OutlinedTextField(
-                            value = uiState.debugPhoneNumber,
-                            onValueChange = onPhoneChange,
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            label = { Text("Phone number for real SMS tests") },
-                            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false)
-                        )
-
-                        debugTemplates.forEach { template ->
-                            DebugTemplateCard(
-                                template = template,
-                                onSimulate = { onSimulateTemplate(template) },
-                                onSend = { onSendTemplate(template) }
+                        Column(modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 16.dp)) {
+                            OutlinedTextField(
+                                value = uiState.debugPhoneNumber,
+                                onValueChange = onPhoneChange,
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text("Phone number for tests") }
                             )
+                            debugTemplates.forEach { template ->
+                                DebugTemplateCard(
+                                    template = template,
+                                    onSimulate = { onSimulateTemplate(template) },
+                                    onSend = { onSendTemplate(template) }
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+        item {
+            ExpandableReviewCard(title = "Review center", subtitle = "See queued AI-reviewed items.", items = uiState.reviewCenterItems, expanded = showReviewCenter, onToggle = { showReviewCenter = !showReviewCenter })
+        }
+        item {
+            ExpandableReviewCard(title = "Spam inbox", subtitle = "Suspicious or rejected SMS.", items = uiState.spamInboxItems, expanded = showSpamInbox, onToggle = { showSpamInbox = !showSpamInbox })
+        }
+        item {
+            ExpandableReviewCard(title = "Debug console", subtitle = "Regex, pre-filter decisions.", items = uiState.debugConsoleItems, expanded = showDebugConsole, onToggle = { showDebugConsole = !showDebugConsole })
+        }
+        item {
+            ExpandableReviewCard(title = "SMS source explorer", subtitle = "Imported SMS details.", items = uiState.importSourceItems, expanded = showSourceExplorer, onToggle = { showSourceExplorer = !showSourceExplorer })
+        }
     }
 }
+
+@Composable
+private fun SettingsSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun SettingsArrowRow(
+    icon: ImageVector,
+    iconBg: Color,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp, horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(iconBg),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
+        Icon(
+            Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    icon: ImageVector,
+    iconBg: Color,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 14.dp, horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(iconBg),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
 
 @Composable
 private fun SpendWiseBottomBar(
     selectedTab: SpendWiseTab,
     onSelected: (SpendWiseTab) -> Unit
 ) {
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-        listOf(
-            SpendWiseTab.HOME to Pair("Home", Icons.Rounded.Home),
-            SpendWiseTab.ACTIVITY to Pair("Activity", Icons.AutoMirrored.Rounded.ReceiptLong),
-            SpendWiseTab.REVIEW_CENTER to Pair("AI Review", Icons.Rounded.Psychology),
-            SpendWiseTab.INSIGHTS to Pair("Insights", Icons.Rounded.PieChart),
-            SpendWiseTab.SETTINGS to Pair("Settings", Icons.Rounded.Settings)
-        ).forEach { (tab, content) ->
+    val tabs = listOf(
+        SpendWiseTab.HOME to Pair("Home", Icons.Rounded.Home),
+        SpendWiseTab.ACTIVITY to Pair("Activity", Icons.AutoMirrored.Rounded.ReceiptLong),
+        SpendWiseTab.REVIEW_CENTER to Pair("AI Review", Icons.Rounded.Psychology),
+        SpendWiseTab.INSIGHTS to Pair("Insights", Icons.Rounded.PieChart),
+        SpendWiseTab.SETTINGS to Pair("Settings", Icons.Rounded.Settings)
+    )
+    NavigationBar(
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp
+    ) {
+        tabs.forEach { (tab, content) ->
+            val selected = selectedTab == tab
             NavigationBarItem(
-                selected = selectedTab == tab,
+                selected = selected,
                 onClick = { onSelected(tab) },
-                icon = { Icon(content.second, contentDescription = content.first) },
-                label = { Text(content.first) }
+                icon = {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                else Color.Transparent
+                            )
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = content.second,
+                            contentDescription = content.first,
+                            tint = if (selected) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                label = {
+                    Text(
+                        text = content.first,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                },
+                colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+                    indicatorColor = Color.Transparent
+                )
             )
         }
     }
@@ -1917,9 +2013,20 @@ internal fun ScreenHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
-            Text(text = title, fontWeight = FontWeight.Bold)
-            Text(text = subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                )
+            }
         }
         if (trailingContent != null || (monthLabel != null && onMonthClick != null)) {
             Row(
@@ -1994,14 +2101,19 @@ private fun StatusCard(uiState: DashboardUiState) {
 
 @Composable
 private fun AccountStatusCard(account: AccountSummary) {
-    Card(colors = CardDefaults.cardColors(containerColor = AccentPurple.copy(alpha = 0.1f))) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text("Account focus", fontWeight = FontWeight.SemiBold, color = AccentPurple)
+            Text(
+                "Account focus",
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelMedium
+            )
             Text(account.label, fontWeight = FontWeight.Bold)
             Text(
                 "${account.transactionCount} transactions · Spent ${formatRupees(account.spent)} · Income ${formatRupees(account.income)}",
@@ -2039,11 +2151,17 @@ private fun DailyReminderCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("DAILY REMINDER", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Black)
+            Text(
+                "Daily Reminder",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
             Text(
                 text = "Get a daily check-in with today's spend total and transaction count.",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(
@@ -2136,9 +2254,15 @@ private fun BackupSettingsCard(
                 .padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("BACKUP, EXPORT & RESTORE", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Black)
+            Text(
+                "Backup, Export & Restore",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
             Text(
                 text = "Export a local SpendWise backup or keep one private backup in your Google Drive app data.",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
@@ -2752,48 +2876,89 @@ private fun SummaryRangeCard(
 @Composable
 private fun HeroSummaryCard(uiState: DashboardUiState) {
     val account = uiState.selectedAccountSummary
-    Card(colors = CardDefaults.cardColors(containerColor = Color.Transparent), shape = RoundedCornerShape(28.dp)) {
-        Column(
-            modifier = Modifier
-                .background(
-                    brush = Brush.linearGradient(listOf(AccentPink, Color(0xFFFF6E90)))
-                )
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+    val spent = if (account != null) account.spent else uiState.totalSpent
+    val income = if (account != null) account.income else uiState.totalReceived
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Spent card
+        Card(
+            modifier = Modifier.weight(1f),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
-            Text(
-                if (account != null) "THIS ACCOUNT" else "TOTAL EXPENSES",
-                color = Color.White.copy(alpha = 0.85f),
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = formatRupees(uiState.totalSpent),
-                color = Color.White,
-                fontWeight = FontWeight.Black
-            )
-            Text(
-                text = if (account != null) {
-                    "${account.label} spent this month"
-                } else {
-                    "Across all tracked accounts this month"
-                },
-                color = Color.White.copy(alpha = 0.88f),
-                fontWeight = FontWeight.Medium
-            )
-            Row(modifier = Modifier.fillMaxWidth()) {
-                StatBlock(Modifier.weight(1f), "Transactions", uiState.transactionCount.toString(), Color.White)
-                StatBlock(
-                    Modifier.weight(1f),
-                    if (account != null) "Income" else "Cash out",
-                    if (account != null) formatRupees(account.income) else formatRupees(uiState.specialTracking.cashWithdrawals),
-                    Color.White
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(AccentPink.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.ArrowDropDown,
+                        contentDescription = null,
+                        tint = AccentPink,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Text(
+                    text = "Spent",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                StatBlock(
-                    Modifier.weight(1f),
-                    if (account != null) "Account" else "Top category",
-                    if (account != null) account.label else uiState.topCategoryName,
-                    Color.White
+                Text(
+                    text = formatRupees(spent),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 1
+                )
+            }
+        }
+        // Income card
+        Card(
+            modifier = Modifier.weight(1f),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(AccentGreen.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.ArrowDownward,
+                        contentDescription = null,
+                        tint = AccentGreen,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Text(
+                    text = "Income",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = formatRupees(income),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 1
                 )
             }
         }
@@ -2896,99 +3061,71 @@ private fun InsightsPreviewCard(
     onViewAll: () -> Unit
 ) {
     val chartValues = topCategories.ifEmpty { listOf(CategoryTotal("Other", 1.0)) }
-    val previewCategories = topCategories.ifEmpty { listOf(CategoryTotal("Other", 0.0)) }
     val chartColors = donutColors(chartValues.size)
-    val topCategoryName = topCategories.firstOrNull()?.category ?: "No category yet"
-    val topPaymentMode = paymentRails.firstOrNull()
 
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    Card(
+        modifier = Modifier.clickable { onViewAll() },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            SectionTitle(title = "Insights", actionLabel = "View all", onAction = onViewAll)
+            Text(
+                "Spending Breakdown",
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium
+            )
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
-                    .padding(16.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(modifier = Modifier.size(104.dp), contentAlignment = Alignment.Center) {
-                        DonutChart(
-                            values = chartValues,
-                            colors = chartColors
-                        )
-                    }
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            "This month spent",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            formatRupees(totalSpent),
-                            color = AccentPink,
-                            fontWeight = FontWeight.Black,
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Text(
-                            text = "Top category: $topCategoryName",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "All categories",
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Bold
-                )
-                previewCategories.forEachIndexed { index, categoryTotal ->
-                    InsightPreviewCategoryRow(
-                        categoryTotal = categoryTotal,
-                        totalSpent = totalSpent,
-                        color = chartColors[index % chartColors.size]
+                Box(modifier = Modifier.size(120.dp), contentAlignment = Alignment.Center) {
+                    DonutChart(
+                        values = chartValues,
+                        colors = chartColors,
+                        animate = true
                     )
                 }
-            }
-
-            if (topPaymentMode != null) {
-                Row(
+                
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(AccentPurple.copy(alpha = 0.12f))
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .weight(1f)
+                        .heightIn(max = 140.dp)
+                        .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        "Top payment mode",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        topPaymentMode.rail,
-                        color = AccentPurple,
-                        fontWeight = FontWeight.Black
-                    )
+                    chartValues.forEachIndexed { index, category ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Canvas(modifier = Modifier.size(10.dp)) {
+                                drawCircle(color = chartColors[index % chartColors.size])
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = category.category,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = formatRupees(category.totalAmount),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -3055,12 +3192,18 @@ private fun SectionTitle(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = title, fontWeight = FontWeight.Bold)
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
         if (actionLabel != null && onAction != null) {
             Text(
-                text = actionLabel,
-                color = AccentPurple,
+                text = "$actionLabel →",
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.clickable(onClick = onAction)
             )
         }
@@ -3710,7 +3853,12 @@ private fun CategoryManagementCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Custom categories", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Custom Categories",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 TextButton(onClick = onAddCategory) { Text("Add") }
             }
             if (categories.isEmpty()) {
@@ -3758,7 +3906,12 @@ private fun AccountLabelManagementCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Account labels", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Account Labels",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 TextButton(
                     onClick = onOpenMergeDialog,
                     enabled = accountSummaries.isNotEmpty()
@@ -3953,7 +4106,12 @@ private fun RuleManagementCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Rules engine", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Rules Engine",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 TextButton(onClick = onAddRule) { Text("New rule") }
             }
             Text("Examples: sender contains HDFC, merchant contains Amazon, or SMS contains recharge.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -4002,7 +4160,12 @@ private fun BudgetManagementCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Budgets", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Budgets",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 TextButton(onClick = onAddBudget) { Text("Add budget") }
             }
             if (goals.isEmpty()) {
@@ -5150,47 +5313,68 @@ private fun TransactionTextEditorDialog(
     onSave: (String) -> Unit
 ) {
     var value by rememberSaveable(initialValue) { mutableStateOf(initialValue) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = keyboardType != KeyboardType.Text,
-                label = { Text(label) },
-                keyboardOptions = KeyboardOptions(keyboardType = keyboardType)
-            )
-            if (suggestions.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(suggestions.distinct()) { suggestion ->
-                        FilterChip(
-                            selected = value.trim() == suggestion,
-                            onClick = { value = suggestion },
-                            label = {
-                                Text(
-                                    suggestion,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        )
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = keyboardType != KeyboardType.Text,
+                    label = { Text(label) },
+                    keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                    )
+                )
+                if (suggestions.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(suggestions.distinct()) { suggestion ->
+                            FilterChip(
+                                selected = value.trim() == suggestion,
+                                onClick = { value = suggestion },
+                                label = {
+                                    Text(
+                                        suggestion,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(
+                        enabled = isValid(value),
+                        onClick = { onSave(value) }
+                    ) {
+                        Text("Save")
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = isValid(value),
-                onClick = { onSave(value) }
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -5272,7 +5456,14 @@ private fun AccountLabelEditorDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     label = { Text("New label") },
-                    placeholder = { Text("Axis Credit ••6307") }
+                    placeholder = { Text("Axis Credit ••6307") },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                    )
                 )
 
                 Row(
@@ -5644,12 +5835,14 @@ private fun TransactionListItem(
     onEditRequest: (() -> Unit)? = null,
     onOpenRequest: (() -> Unit)? = null,
     onRemoveDuplicateRequest: (() -> Unit)? = null,
-    isLikelyDuplicate: Boolean = false
+    isLikelyDuplicate: Boolean = false,
+    containerColor: Color = MaterialTheme.colorScheme.surface,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(16.dp)
 ) {
     val amountColor = when (transaction.type) {
         TransactionType.DEBIT -> AccentPink
         TransactionType.CREDIT -> AccentGreen
-        TransactionType.UNKNOWN -> Color(0xFF39424E)
+        TransactionType.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val amountPrefix = when (transaction.type) {
         TransactionType.DEBIT -> "-"
@@ -5660,10 +5853,7 @@ private fun TransactionListItem(
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { target ->
             when (target) {
-                SwipeToDismissBoxValue.StartToEnd -> {
-                    onEditRequest?.invoke()
-                    false
-                }
+                SwipeToDismissBoxValue.StartToEnd -> false
 
                 SwipeToDismissBoxValue.EndToStart -> {
                     onDeleteRequest?.invoke()
@@ -5677,96 +5867,129 @@ private fun TransactionListItem(
 
     SwipeToDismissBox(
         state = dismissState,
+        enableDismissFromStartToEnd = false,
         backgroundContent = {
-            SwipeBackground(
-                alignment = Alignment.CenterStart,
-                color = AccentTeal.copy(alpha = 0.2f),
-                icon = Icons.Rounded.Edit,
-                label = "Edit"
-            )
-            SwipeBackground(
-                alignment = Alignment.CenterEnd,
-                color = AccentPink.copy(alpha = 0.2f),
-                icon = Icons.Rounded.DeleteOutline,
-                label = "Delete"
-            )
+            if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+                SwipeBackground(
+                    alignment = Alignment.CenterEnd,
+                    color = AccentPink.copy(alpha = 0.2f),
+                    icon = Icons.Rounded.DeleteOutline,
+                    label = "Delete"
+                )
+            }
         },
         modifier = Modifier.fillMaxWidth()
     ) {
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = containerColor),
+            shape = shape,
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onOpenRequest?.invoke() }
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Category icon
                 Box(
                     modifier = Modifier
-                        .size(50.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(colorForCategory(transaction.category).copy(alpha = 0.16f)),
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colorForCategory(transaction.category).copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(iconForCategory(transaction.category), contentDescription = null, tint = colorForCategory(transaction.category))
+                    Icon(
+                        iconForCategory(transaction.category),
+                        contentDescription = null,
+                        tint = colorForCategory(transaction.category),
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                // Text content
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.Center
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             transaction.merchant,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.align(Alignment.CenterVertically)
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f, fill = false),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (transaction.isVerifiedByAi) {
-                            AssistChip(
-                                onClick = {},
-                                label = { Text("AI") },
-                                leadingIcon = { Icon(Icons.Rounded.Psychology, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                                colors = AssistChipDefaults.assistChipColors(containerColor = AccentPurple.copy(alpha = 0.12f)),
-                                modifier = Modifier.height(24.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    "AI",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                         if (isLikelyDuplicate && onRemoveDuplicateRequest != null) {
-                            AssistChip(
-                                onClick = onRemoveDuplicateRequest,
-                                label = { Text("Duplicate") },
-                                leadingIcon = { Icon(Icons.Rounded.Close, contentDescription = "Not Duplicate", modifier = Modifier.size(14.dp)) },
-                                colors = AssistChipDefaults.assistChipColors(containerColor = AccentPink.copy(alpha = 0.12f)),
-                                modifier = Modifier.height(24.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(AccentPink.copy(alpha = 0.14f))
+                                    .clickable { onRemoveDuplicateRequest() }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    "Dup",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AccentPink,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         } else if (isLikelyDuplicate) {
-                             AssistChip(
-                                onClick = {},
-                                label = { Text("Duplicate") },
-                                colors = AssistChipDefaults.assistChipColors(containerColor = AccentPink.copy(alpha = 0.12f)),
-                                modifier = Modifier.height(24.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(AccentPink.copy(alpha = 0.14f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    "Dup",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AccentPink,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
-                    // Account label row
                     val label = transaction.accountLabel.ifBlank { transaction.bank }
                     Text(
-                        text = "$label · ${transaction.category} · ${formatDate(transaction.timestamp)}",
+                        text = if (label.isNotBlank()) "$label · ${transaction.category}"
+                               else transaction.category,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (onDeleteRequest != null) {
-                    IconButton(onClick = onDeleteRequest) {
-                        Icon(
-                            Icons.Rounded.DeleteOutline,
-                            contentDescription = "Delete transaction",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Text(amountPrefix + formatRupees(transaction.amount), color = amountColor, fontWeight = FontWeight.Black)
+                // Amount
+                Text(
+                    text = amountPrefix + formatRupees(transaction.amount),
+                    color = amountColor,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
         }
     }
@@ -5827,26 +6050,28 @@ private fun SegmentedToggle(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .clip(RoundedCornerShape(50.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(4.dp)
     ) {
         options.forEachIndexed { index, label ->
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(50.dp))
                     .background(
-                        if (selectedIndex == index) MaterialTheme.colorScheme.errorContainer else Color.Transparent
+                        if (selectedIndex == index) MaterialTheme.colorScheme.primary
+                        else Color.Transparent
                     )
                     .clickable { onSelected(index) }
-                    .padding(vertical = 12.dp),
+                    .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = label,
                     fontWeight = if (selectedIndex == index) FontWeight.Bold else FontWeight.Medium,
-                    color = if (selectedIndex == index) AccentPink else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (selectedIndex == index) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -5854,22 +6079,54 @@ private fun SegmentedToggle(
 }
 
 @Composable
-private fun DonutChart(values: List<CategoryTotal>, colors: List<Color>) {
+private fun DonutChart(values: List<CategoryTotal>, colors: List<Color>, animate: Boolean = true) {
     val total = values.sumOf { it.totalAmount }.takeIf { it > 0.0 } ?: 1.0
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        var startAngle = -90f
-        val thickness = size.minDimension * 0.22f
-        values.forEachIndexed { index, category ->
-            val sweep = ((category.totalAmount / total) * 360f).toFloat()
-            drawArc(
-                color = colors[index % colors.size],
-                startAngle = startAngle,
-                sweepAngle = sweep,
-                useCenter = false,
-                size = Size(size.width, size.height),
-                style = Stroke(width = thickness, cap = StrokeCap.Butt)
+
+    val animationProgress = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(values) {
+        if (animate) {
+            animationProgress.snapTo(0f)
+            animationProgress.animateTo(
+                1f,
+                animationSpec = androidx.compose.animation.core.tween(
+                    durationMillis = 1000,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                )
             )
-            startAngle += sweep
+        } else {
+            animationProgress.snapTo(1f)
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        var currentStartAngle = 15f
+        val thickness = size.minDimension * 0.22f
+        val gapAngle = 1.5f
+        val maxAllowedSweep = 360f * animationProgress.value
+        
+        var cumulativeSweep = 0f
+
+        values.forEachIndexed { index, category ->
+            val sliceSweep = ((category.totalAmount / total) * 360f).toFloat()
+            if (cumulativeSweep >= maxAllowedSweep) return@forEachIndexed
+            
+            val allowedForThisSlice = minOf(sliceSweep, maxAllowedSweep - cumulativeSweep)
+            
+            val actualSweep = if (allowedForThisSlice > gapAngle) allowedForThisSlice - gapAngle else allowedForThisSlice
+            val baseAngle = currentStartAngle - if (allowedForThisSlice > gapAngle) gapAngle / 2f else 0f
+            
+            if (actualSweep > 0f) {
+                drawArc(
+                    color = colors[index % colors.size],
+                    startAngle = baseAngle,
+                    sweepAngle = -actualSweep,
+                    useCenter = false,
+                    size = Size(size.width, size.height),
+                    style = Stroke(width = thickness, cap = StrokeCap.Butt)
+                )
+            }
+            currentStartAngle -= sliceSweep
+            cumulativeSweep += sliceSweep
         }
     }
 }
@@ -6043,19 +6300,20 @@ private fun ManualTransactionDialog(
 }
 
 private fun iconForCategory(category: String) = when (category) {
-    "UPI" -> Icons.Rounded.Payments
-    "Food" -> Icons.Rounded.Restaurant
-    "Shopping" -> Icons.Rounded.ShoppingBag
-    "Entertainment" -> Icons.Rounded.Movie
-    "Bills" -> Icons.Rounded.AccountBalanceWallet
-    "Loans & EMI" -> Icons.Rounded.AccountBalanceWallet
-    "Travel" -> Icons.Rounded.DirectionsCar
-    "Gifts & Rewards" -> Icons.Rounded.SwapHoriz
-    "Income" -> Icons.Rounded.ArrowDownward
-    "Salary" -> Icons.Rounded.ArrowDownward
-    "Refunds" -> Icons.Rounded.SwapHoriz
-    "Cash Withdrawal" -> Icons.Rounded.LocalAtm
-    else -> Icons.Rounded.CreditCard
+    "UPI" -> Icons.Rounded.QrCodeScanner
+    "Food" -> Icons.Rounded.Fastfood
+    "Shopping" -> Icons.Rounded.Storefront
+    "Entertainment" -> Icons.Rounded.SportsEsports
+    "Bills" -> Icons.AutoMirrored.Rounded.ReceiptLong
+    "Loans & EMI" -> Icons.Rounded.RealEstateAgent
+    "Travel" -> Icons.Rounded.FlightTakeoff
+    "Gifts & Rewards" -> Icons.Rounded.CardGiftcard
+    "Income" -> Icons.Rounded.TrendingUp
+    "Salary" -> Icons.Rounded.Work
+    "Refunds" -> Icons.Rounded.SettingsBackupRestore
+    "Cash Withdrawal" -> Icons.Rounded.Atm
+    "Tolls" -> Icons.Rounded.Toll
+    else -> Icons.Rounded.Category
 }
 
 private fun colorForCategory(category: String) = when (category) {
@@ -6208,5 +6466,37 @@ private fun Context.findActivity(): Activity? {
     return null
 }
 
-
-
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CustomDateRangeDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (Long, Long) -> Unit
+) {
+    val dateRangePickerState = androidx.compose.material3.rememberDateRangePickerState()
+    
+    androidx.compose.material3.DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val start = dateRangePickerState.selectedStartDateMillis
+                    val end = dateRangePickerState.selectedEndDateMillis
+                    if (start != null && end != null) {
+                        onConfirm(start, end + 86399999L)
+                    }
+                },
+                enabled = dateRangePickerState.selectedStartDateMillis != null && dateRangePickerState.selectedEndDateMillis != null
+            ) {
+                Text("Sync")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    ) {
+        androidx.compose.material3.DateRangePicker(
+            state = dateRangePickerState,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}

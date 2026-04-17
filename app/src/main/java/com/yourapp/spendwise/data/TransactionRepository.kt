@@ -824,14 +824,21 @@ class TransactionRepository(context: Context) {
         GmailAxisSyncManager.ensureScheduled(appContext)
     }
 
-    suspend fun syncAxisEmailsNow(trigger: String = AxisEmailSyncTrigger.MANUAL): AxisEmailSyncResult {
-        return GmailAxisSyncManager.syncNow(appContext, trigger)
+    suspend fun syncAxisEmailsNow(
+        trigger: String = AxisEmailSyncTrigger.MANUAL,
+        customRangeMs: Pair<Long, Long>? = null
+    ): AxisEmailSyncResult {
+        return GmailAxisSyncManager.syncNow(appContext, trigger, customRangeMs)
     }
 
     fun getThemeMode(): String = settingsStore.getThemeMode()
 
     fun setThemeMode(mode: String) {
         settingsStore.setThemeMode(mode)
+    }
+
+    fun setLegacyThemesEnabled(enabled: Boolean) {
+        settingsStore.setLegacyThemesEnabled(enabled)
     }
 
     fun isDailyReminderEnabled(): Boolean = settingsStore.isDailyReminderEnabled()
