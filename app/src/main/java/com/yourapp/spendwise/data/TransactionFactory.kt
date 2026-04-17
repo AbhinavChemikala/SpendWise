@@ -21,7 +21,9 @@ object TransactionFactory {
         verificationSource: String = if (isVerifiedByAi) "Gemini Nano" else "Prefilter",
         aiReason: String = "",
         aiCardLast4: String = "",
-        aiCardType: String = ""
+        aiCardType: String = "",
+        latitude: Double? = null,
+        longitude: Double? = null
     ): TransactionEntity {
         val settingsStore = SettingsStore(context.applicationContext)
         val now = System.currentTimeMillis()
@@ -80,7 +82,9 @@ object TransactionFactory {
             } else {
                 CategoryRefinementStatus.PENDING
             },
-            categoryRuleName = matchedRule?.name?.trim().orEmpty()
+            categoryRuleName = matchedRule?.name?.trim().orEmpty(),
+            latitude = latitude,
+            longitude = longitude
         )
     }
 }

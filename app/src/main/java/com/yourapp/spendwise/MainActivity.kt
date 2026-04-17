@@ -24,6 +24,7 @@ import com.yourapp.spendwise.ui.normalizeThemeMode
 import com.yourapp.spendwise.background.BackupScheduler
 import com.yourapp.spendwise.background.DailyReminderScheduler
 import android.content.Intent
+import org.osmdroid.config.Configuration
 
 class MainActivity : ComponentActivity() {
 
@@ -31,6 +32,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Initialise osmdroid — must be done before any MapView is created
+        Configuration.getInstance().apply {
+            userAgentValue = "SpendWise/1.0 Android (transaction location map)"
+            osmdroidBasePath = filesDir
+            osmdroidTileCache = cacheDir.resolve("osmdroid_tiles")
+        }
         requestSmsPermissions()
         SpendWiseNotificationManager.ensureChannel(this)
         DailyReminderScheduler.scheduleNext(this)

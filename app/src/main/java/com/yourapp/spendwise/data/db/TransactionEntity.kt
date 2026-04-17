@@ -37,5 +37,7 @@ data class TransactionEntity(
     val updatedAt: Long = 0L,
     val categoryDecisionSource: String = "RESOLVER",
     val categoryRefinementStatus: String = "NONE",
-    val categoryRuleName: String = ""
+    val categoryRuleName: String = "",
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )

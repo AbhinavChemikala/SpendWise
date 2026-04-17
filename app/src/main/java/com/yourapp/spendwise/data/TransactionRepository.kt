@@ -25,6 +25,7 @@ import com.yourapp.spendwise.mail.AxisEmailSyncHistoryEntry
 import com.yourapp.spendwise.mail.AxisEmailSyncTrigger
 import com.yourapp.spendwise.mail.GmailAxisSyncManager
 import com.yourapp.spendwise.mail.NotificationAccessHelper
+import com.yourapp.spendwise.data.LocationHelper
 import com.yourapp.spendwise.sms.SmsIntakeOutcome
 import com.yourapp.spendwise.sms.SmsIntakeManager
 import com.yourapp.spendwise.sms.SmsProcessor
@@ -341,8 +342,11 @@ class TransactionRepository(context: Context) {
         amount: Double,
         type: TransactionType,
         merchant: String,
-        bank: String
+        bank: String,
+        category: String = "Other",
+        note: String = ""
     ) = withContext(Dispatchers.IO) {
+        val (lat, lng) = LocationHelper.getLocation(appContext) ?: (null to null)
         val transaction = TransactionFactory.create(
             context = appContext,
             amount = amount,
@@ -353,8 +357,20 @@ class TransactionRepository(context: Context) {
             sourceSender = bank,
             timestamp = System.currentTimeMillis(),
             isVerifiedByAi = false,
-            verificationSource = "Manual Entry"
-        )
+            verificationSource = "Manual Entry",
+            note = note,
+            latitude = lat,
+            longitude = lng
+        ).let { base ->
+            // Override the auto-resolved category with the user's explicit choice
+            if (category.isNotBlank() && category != "Other") {
+                base.copy(
+                    category = category,
+                    categoryDecisionSource = CategoryDecisionSource.USER_EDIT,
+                    categoryRefinementStatus = CategoryRefinementStatus.SKIPPED_RULE
+                )
+            } else base
+        }
         val id = transactionDao.insert(transaction)
         if (id > 0L) {
             scheduleCategoryRefinementIfNeeded(transaction.copy(id = id))

@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
+import com.yourapp.spendwise.data.LocationCache
+import com.yourapp.spendwise.data.LocationHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -24,6 +26,15 @@ class SmsReceiver : BroadcastReceiver() {
             }
 
             CoroutineScope(Dispatchers.IO).launch {
+                // ── Snapshot location FIRST at detection time ──────────────────
+                // We cache coords immediately so there's zero timing gap between
+                // the SMS arrival and the GPS read. The cache entry is consumed
+                // when the transaction is confirmed, or evicted if discarded.
+                val location = LocationHelper.getLocation(context.applicationContext)
+                if (location != null) {
+                    LocationCache.put(body, timestamp, location)
+                }
+                // ──────────────────────────────────────────────────────────────
                 val outcome = SmsIntakeManager.ingest(
                     context = context.applicationContext,
                     sender = sender,

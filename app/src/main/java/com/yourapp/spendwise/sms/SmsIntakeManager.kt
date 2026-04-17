@@ -2,6 +2,8 @@ package com.yourapp.spendwise.sms
 
 import android.content.Context
 import com.yourapp.spendwise.background.TransactionCategoryRefinementWorker
+import com.yourapp.spendwise.data.LocationCache
+import com.yourapp.spendwise.data.LocationHelper
 import com.yourapp.spendwise.data.TransactionFactory
 import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.PendingSmsEntity
@@ -29,7 +31,9 @@ object SmsIntakeManager {
         bank: String,
         eventSource: String = "EMAIL",
         emitNotifications: Boolean = false,
-        emitPendingEvent: Boolean = true
+        emitPendingEvent: Boolean = true,
+        latitude: Double? = null,
+        longitude: Double? = null
     ): SmsIntakeOutcome = withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
         val database = AppDatabase.getInstance(appContext)
@@ -66,10 +70,13 @@ object SmsIntakeManager {
                     debugLog = "$debugLog\nfinal=duplicate_skipped"
                 )
             )
+            LocationCache.evict(body, timestamp)
             return@withContext SmsIntakeOutcome.Discarded
         }
 
         if (!isAiReviewEnabled) {
+            // Use coords supplied by the caller (snapshotted when the sync job started).
+            // This covers the Spark-mail path where one location serves the whole email batch.
             val transaction = TransactionFactory.create(
                 context = appContext,
                 amount = amount,
@@ -80,7 +87,9 @@ object SmsIntakeManager {
                 sourceSender = sender,
                 timestamp = timestamp,
                 isVerifiedByAi = false,
-                verificationSource = "Email Intake"
+                verificationSource = "Email Intake",
+                latitude = latitude,
+                longitude = longitude
             )
             val insertedId = transactionDao.insert(transaction)
             if (insertedId != -1L) {
@@ -121,6 +130,11 @@ object SmsIntakeManager {
 
         if (pendingSmsDao.exists(sender = sender, body = body, receivedAt = timestamp)) {
             return@withContext SmsIntakeOutcome.Discarded
+        }
+
+        // Seed the location cache so SmsProcessor can pick it up when AI confirms.
+        if (latitude != null && longitude != null) {
+            LocationCache.put(body, timestamp, latitude to longitude)
         }
 
         val reviewEventId = reviewDao.insert(
@@ -186,10 +200,11 @@ object SmsIntakeManager {
         val inspection = SmsPreFilter.inspect(sender = sender, body = body)
         val preview = SmsPreFilter.preview(sender = sender, body = body)
         val debugLog = SmsPreFilter.buildDebugLog(sender = sender, body = body)
-        
+
         val settingsStore = com.yourapp.spendwise.data.SettingsStore(context)
         val isAiReviewEnabled = settingsStore.isAiReviewEnabled()
 
+        // Duplicate: evict any cached location for this SMS
         if (transactionDao.exists(rawSms = body, timestamp = timestamp) || reviewDao.exists(body = body, receivedAt = timestamp)) {
             reviewDao.insert(
                 SmsReviewEntity(
@@ -206,11 +221,13 @@ object SmsIntakeManager {
                     debugLog = "$debugLog\nfinal=duplicate_skipped"
                 )
             )
+            LocationCache.evict(body, timestamp)
             return@withContext SmsIntakeOutcome.Discarded
         }
 
         when (val result = SmsPreFilter.evaluate(sender, body)) {
             is PreFilterResult.Confident -> {
+                val (lat, lng) = LocationCache.pop(body, timestamp) ?: (null to null)
                 val transaction = TransactionFactory.create(
                     context = appContext,
                     amount = result.amount,
@@ -221,7 +238,9 @@ object SmsIntakeManager {
                     sourceSender = sender,
                     timestamp = timestamp,
                     isVerifiedByAi = false,
-                    verificationSource = "Prefilter"
+                    verificationSource = "Prefilter",
+                    latitude = lat,
+                    longitude = lng
                 )
                 val insertedId = transactionDao.insert(transaction)
                 if (insertedId != -1L) {
@@ -263,6 +282,7 @@ object SmsIntakeManager {
 
             PreFilterResult.NeedsAiReview -> {
                 if (!isAiReviewEnabled) {
+                    val (lat, lng) = LocationCache.pop(body, timestamp) ?: (null to null)
                     val transaction = TransactionFactory.create(
                         context = appContext,
                         amount = inspection.amount ?: 0.0,
@@ -273,7 +293,9 @@ object SmsIntakeManager {
                         sourceSender = sender,
                         timestamp = timestamp,
                         isVerifiedByAi = false,
-                        verificationSource = "Prefilter-Forced"
+                        verificationSource = "Prefilter-Forced",
+                        latitude = lat,
+                        longitude = lng
                     )
                     val insertedId = transactionDao.insert(transaction)
                     if (insertedId != -1L) {

@@ -3,6 +3,7 @@ package com.yourapp.spendwise.sms
 import android.content.Context
 import android.util.Log
 import com.yourapp.spendwise.background.TransactionCategoryRefinementWorker
+import com.yourapp.spendwise.data.LocationCache
 import com.yourapp.spendwise.data.SettingsStore
 import com.yourapp.spendwise.data.TransactionFactory
 import com.yourapp.spendwise.data.db.AppDatabase
@@ -54,6 +55,7 @@ class SmsProcessor(context: Context) {
                 if (analysis == null || aiResult == null) {
                     withContext(Dispatchers.IO) {
                         pendingSmsDao.deleteById(pending.id)
+                        LocationCache.evict(pending.body, pending.receivedAt)
                         pending.reviewEventId?.let { eventId ->
                             reviewDao.updateOutcome(
                                 eventId = eventId,
@@ -77,6 +79,7 @@ class SmsProcessor(context: Context) {
                 if (!aiResult.isGenuine) {
                     withContext(Dispatchers.IO) {
                         pendingSmsDao.deleteById(pending.id)
+                        LocationCache.evict(pending.body, pending.receivedAt)
                         pending.reviewEventId?.let { eventId ->
                             reviewDao.updateOutcome(
                                 eventId = eventId,
@@ -99,6 +102,7 @@ class SmsProcessor(context: Context) {
 
                 val type = aiResult.type.toTransactionType()
                 if (type != TransactionType.UNKNOWN && aiResult.amount > 0.0) {
+                    val (lat, lng) = LocationCache.pop(pending.body, pending.receivedAt) ?: (null to null)
                     val transaction = pending.toTransactionEntity(
                         amount = aiResult.amount,
                         type = type,
@@ -111,7 +115,9 @@ class SmsProcessor(context: Context) {
                         aiReason = aiResult.reason,
                         verificationSource = analysis.source,
                         aiCardLast4 = aiResult.cardLast4,
-                        aiCardType  = aiResult.cardType
+                        aiCardType  = aiResult.cardType,
+                        latitude = lat,
+                        longitude = lng
                     )
                     var insertedId = -1L
                     withContext(Dispatchers.IO) {
@@ -144,6 +150,7 @@ class SmsProcessor(context: Context) {
                     // reject cleanly so it doesn't clog the queue.
                     withContext(Dispatchers.IO) {
                         pendingSmsDao.deleteById(pending.id)
+                        LocationCache.evict(pending.body, pending.receivedAt)
                         pending.reviewEventId?.let { eventId ->
                             reviewDao.updateOutcome(
                                 eventId = eventId,
@@ -227,7 +234,9 @@ class SmsProcessor(context: Context) {
         aiReason: String,
         verificationSource: String = "Gemini Nano",
         aiCardLast4: String = "",
-        aiCardType: String = ""
+        aiCardType: String = "",
+        latitude: Double? = null,
+        longitude: Double? = null
     ) = TransactionFactory.create(
         context = appContext,
         amount = amount,
@@ -241,6 +250,8 @@ class SmsProcessor(context: Context) {
         verificationSource = verificationSource,
         aiReason = aiReason,
         aiCardLast4 = aiCardLast4,
-        aiCardType  = aiCardType
+        aiCardType  = aiCardType,
+        latitude = latitude,
+        longitude = longitude
     )
 }

@@ -855,14 +855,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         amount: Double,
         type: TransactionType,
         merchant: String,
-        bank: String
+        bank: String,
+        category: String = "Other",
+        note: String = ""
     ) {
         viewModelScope.launch {
             repository.addManualTransaction(
                 amount = amount,
                 type = type,
                 merchant = merchant,
-                bank = bank
+                bank = bank,
+                category = category,
+                note = note
             )
             _uiState.update {
                 it.copy(

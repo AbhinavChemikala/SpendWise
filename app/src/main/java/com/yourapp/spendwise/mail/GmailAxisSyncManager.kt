@@ -20,6 +20,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import com.yourapp.spendwise.data.LocationHelper
 import com.yourapp.spendwise.data.SettingsStore
 import com.yourapp.spendwise.data.db.AppDatabase
 import com.yourapp.spendwise.data.db.PendingSmsEntity
@@ -246,6 +247,12 @@ object GmailAxisSyncManager {
         val transactionDao = database.transactionDao()
         val pendingSmsDao = database.pendingSmsDao()
 
+        // Snapshot location NOW — as close to the Spark notification trigger as
+        // WorkManager scheduling allows. We use one snapshot per sync batch and
+        // pass it directly to every ingestEmailCandidate() call so we don't need
+        // to reverse-engineer the body/timestamp key used by LocationCache.
+        val (syncLat, syncLng) = LocationHelper.getLocation(appContext) ?: (null to null)
+
         var scanned = 0
         var imported = 0
         var duplicates = 0
@@ -314,7 +321,9 @@ object GmailAxisSyncManager {
                     bank = "Axis Bank",
                     eventSource = "EMAIL",
                     emitNotifications = true,
-                    emitPendingEvent = true
+                    emitPendingEvent = true,
+                    latitude = syncLat,
+                    longitude = syncLng
                 )
             ) {
                 is SmsIntakeOutcome.Confirmed -> {

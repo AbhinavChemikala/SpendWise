@@ -44,12 +44,15 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.AccountBalanceWallet
-import androidx.compose.material.icons.rounded.Payments
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CreditCard
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
@@ -80,6 +83,12 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material.icons.rounded.Edit
@@ -151,6 +160,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.LocationOn
+import androidx.compose.material.icons.rounded.LocationOff
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -561,6 +572,83 @@ fun SpendWiseApp(vm: MainViewModel) {
         }
     }
 
+    // ── Location permissions ────────────────────────────────────────────────
+    // Step 1: foreground (FINE / COARSE) — needed for all transaction types.
+    // Step 2: background (ACCESS_BACKGROUND_LOCATION) — needed for SMS capture
+    //         when the app is closed. We ask after step 1 with a rationale dialog.
+    var showBackgroundLocationRationale by rememberSaveable { mutableStateOf(false) }
+
+    val backgroundLocationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { /* granted or denied — location helper handles both gracefully */ }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        // If any foreground permission was just granted, check background
+        val foregroundGranted = permissions.values.any { it }
+        if (foregroundGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val hasBg = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!hasBg) showBackgroundLocationRationale = true
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasFine = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!hasCoarse && !hasFine) {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            // App already had foreground location — check if background is also needed
+            val hasBg = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!hasBg) showBackgroundLocationRationale = true
+        }
+    }
+
+    // Rationale dialog shown once — explains why "Allow all the time" helps
+    if (showBackgroundLocationRationale) {
+        AlertDialog(
+            onDismissRequest = { showBackgroundLocationRationale = false },
+            title = { Text("Enable Background Location?") },
+            text = {
+                Text(
+                    "SpendWise can record where you were when a transaction SMS arrives — " +
+                    "even when the app is closed.\n\n" +
+                    "Choose \"Allow all the time\" on the next screen to enable this. " +
+                    "This is optional and only used for transaction location tagging."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBackgroundLocationRationale = false
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        backgroundLocationLauncher.launch(
+                            Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                        )
+                    }
+                }) { Text("Enable") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBackgroundLocationRationale = false }) {
+                    Text("Not now")
+                }
+            }
+        )
+    }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -610,10 +698,11 @@ fun SpendWiseApp(vm: MainViewModel) {
 
     if (uiState.showManualAddDialog) {
         ManualTransactionDialog(
+            availableCategories = availableCategories(uiState.customCategories, uiState.transactions, null),
             onDismiss = vm::closeManualAddDialog,
-            onSave = { amount, type, merchant, bank ->
+            onSave = { amount, type, merchant, bank, category, note ->
                 vm.closeManualAddDialog()
-                vm.addManualTransaction(amount, type, merchant, bank)
+                vm.addManualTransaction(amount, type, merchant, bank, category, note)
             }
         )
     }
@@ -4717,6 +4806,205 @@ private fun RuleEditorDialog(
 }
 
 @Composable
+private fun LocationCard(
+    latitude: Double?,
+    longitude: Double?,
+    containerColor: Color,
+    strokeColor: Color
+) {
+    val context = LocalContext.current
+    val hasLocation = latitude != null && longitude != null
+
+    val openInMaps: () -> Unit = {
+        if (latitude != null && longitude != null) {
+            val uri = Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude(Transaction+Location)")
+            val mapIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage("com.google.android.apps.maps")
+            }
+            val chooser = Intent.createChooser(
+                if (mapIntent.resolveActivity(context.packageManager) != null) mapIntent
+                else Intent(Intent.ACTION_VIEW, uri),
+                "Open in Maps"
+            )
+            context.startActivity(chooser)
+        }
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        border = BorderStroke(1.dp, strokeColor),
+        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (hasLocation) Modifier.clickable { openInMaps() } else Modifier)
+    ) {
+        Column {
+
+            // ── Map preview ──────────────────────────────────────────────────
+            if (hasLocation && latitude != null && longitude != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                ) {
+                    // osmdroid MapView — non-interactive, exact marker placement
+                    val mapZoom = 17.0
+                    AndroidView(
+                        factory = { ctx ->
+                            org.osmdroid.views.MapView(ctx).apply {
+                                // Disable all user interaction — static preview only
+                                setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
+                                isFocusable = false
+                                isFocusableInTouchMode = false
+                                setMultiTouchControls(false)
+                                isClickable = false
+                                setBuiltInZoomControls(false)
+                                overlayManager.tilesOverlay.setColorFilter(null)
+
+                                // Zoom and centre
+                                controller.setZoom(mapZoom)
+                                controller.setCenter(
+                                    org.osmdroid.util.GeoPoint(latitude, longitude)
+                                )
+
+                                // Marker at exact coordinates
+                                val marker = org.osmdroid.views.overlay.Marker(this).apply {
+                                    position = org.osmdroid.util.GeoPoint(latitude, longitude)
+                                    setAnchor(
+                                        org.osmdroid.views.overlay.Marker.ANCHOR_CENTER,
+                                        org.osmdroid.views.overlay.Marker.ANCHOR_BOTTOM
+                                    )
+                                    // Use the default osmdroid red pin (no custom drawable needed)
+                                    title = "Transaction Location"
+                                }
+                                overlays.add(marker)
+                            }
+                        },
+                        update = { mapView ->
+                            mapView.controller.setZoom(mapZoom)
+                            mapView.controller.setCenter(
+                                org.osmdroid.util.GeoPoint(latitude, longitude)
+                            )
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    // Gradient fade at bottom to blend into the info row
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp)
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, containerColor)
+                                )
+                            )
+                    )
+
+                    // "Open in Maps ↗" pill — top right
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(10.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.52f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Open in Maps ↗",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            // ── Info row ────────────────────────────────────────────────────
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (hasLocation) Modifier.background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    AccentTeal.copy(alpha = 0.14f),
+                                    AccentPurple.copy(alpha = 0.10f)
+                                )
+                            )
+                        ) else Modifier
+                    )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (hasLocation) AccentTeal.copy(alpha = 0.20f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (hasLocation) Icons.Rounded.LocationOn else Icons.Rounded.LocationOff,
+                            contentDescription = null,
+                            tint = if (hasLocation) AccentTeal else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Transaction Location",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (hasLocation && latitude != null && longitude != null) {
+                            val latDir = if (latitude >= 0) "N" else "S"
+                            val lngDir = if (longitude >= 0) "E" else "W"
+                            Text(
+                                text = "${"%.4f".format(kotlin.math.abs(latitude))}° $latDir,  " +
+                                    "${"%.4f".format(kotlin.math.abs(longitude))}° $lngDir",
+                                color = AccentTeal,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Tap to open in Google Maps",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            )
+                        } else {
+                            Text(
+                                text = "Location unavailable for this transaction",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (hasLocation) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = "Open Maps",
+                            tint = AccentTeal.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun TransactionDetailDialog(
     transaction: TransactionEntity,
     initialMode: TransactionDialogMode,
@@ -5051,6 +5339,14 @@ private fun TransactionDetailDialog(
                             showSimilarSheet = true
                             onFindSimilar(editedTransaction)
                         }
+                    )
+                }
+                item {
+                    LocationCard(
+                        latitude = transaction.latitude,
+                        longitude = transaction.longitude,
+                        containerColor = detailVariant,
+                        strokeColor = detailStroke
                     )
                 }
                 item {
@@ -6538,40 +6834,342 @@ private fun MonthPickerDialog(
 
 @Composable
 private fun ManualTransactionDialog(
+    availableCategories: List<String>,
     onDismiss: () -> Unit,
-    onSave: (amount: Double, type: TransactionType, merchant: String, bank: String) -> Unit
+    onSave: (amount: Double, type: TransactionType, merchant: String, bank: String, category: String, note: String) -> Unit
 ) {
-    var amount by rememberSaveable { mutableStateOf("") }
+    var rawAmount by rememberSaveable { mutableStateOf("") }
     var merchant by rememberSaveable { mutableStateOf("") }
     var bank by rememberSaveable { mutableStateOf("") }
+    var note by rememberSaveable { mutableStateOf("") }
     var selectedTypeIndex by rememberSaveable { mutableIntStateOf(0) }
+    var selectedCategory by rememberSaveable { mutableStateOf("Other") }
+    val isExpense = selectedTypeIndex == 0
 
-    AlertDialog(
+    // Quick categories to show in the grid
+    val quickCategories = remember(availableCategories) {
+        val base = listOf("Food", "Shopping", "Travel", "Bills", "UPI", "Entertainment",
+            "Loans & EMI", "Salary", "Refunds", "Cash Withdrawal", "Gifts & Rewards", "Other")
+        (base + availableCategories).distinct()
+    }
+
+    val amountDouble = rawAmount.toDoubleOrNull()
+    val canSave = amountDouble != null && amountDouble > 0
+
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add transaction") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SegmentedToggle(listOf("Expense", "Income"), selectedTypeIndex) { selectedTypeIndex = it }
-                OutlinedTextField(amount, { amount = it }, label = { Text("Amount") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(merchant, { merchant = it }, label = { Text("Merchant") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(bank, { bank = it }, label = { Text("Bank / source") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.97f)
+                .fillMaxHeight(0.92f),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 24.dp)
+                ) {
+
+                    // ── Header ───────────────────────────────────────────────
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        if (isExpense) AccentPink.copy(alpha = 0.18f) else AccentGreen.copy(alpha = 0.18f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                            .padding(top = 20.dp, bottom = 8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Add Transaction",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 18.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Expense / Income toggle pill
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(4.dp)
+                            ) {
+                                Row {
+                                    listOf("Expense", "Income").forEachIndexed { idx, label ->
+                                        val selected = selectedTypeIndex == idx
+                                        val bg = when {
+                                            selected && idx == 0 -> AccentPink
+                                            selected && idx == 1 -> AccentGreen
+                                            else -> Color.Transparent
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(bg)
+                                                .clickable { selectedTypeIndex = idx }
+                                                .padding(horizontal = 28.dp, vertical = 10.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            // ── Big Amount Display ───────────────────────────
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "₹",
+                                    color = if (isExpense) AccentPink else AccentGreen,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 36.sp,
+                                    modifier = Modifier.padding(end = 4.dp, top = 8.dp)
+                                )
+                                BasicTextField(
+                                    value = rawAmount,
+                                    onValueChange = { v ->
+                                        // Allow only digits and one decimal point
+                                        val filtered = v.filter { it.isDigit() || it == '.' }
+                                        val dots = filtered.count { it == '.' }
+                                        if (dots <= 1) rawAmount = filtered
+                                    },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                                    textStyle = LocalTextStyle.current.copy(
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 52.sp,
+                                        textAlign = TextAlign.Center,
+                                        fontFamily = FontFamily.Default
+                                    ),
+                                    cursorBrush = SolidColor(if (isExpense) AccentPink else AccentGreen),
+                                    decorationBox = { inner ->
+                                        Box(contentAlignment = Alignment.Center) {
+                                            if (rawAmount.isEmpty()) {
+                                                Text(
+                                                    text = "0",
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.3f),
+                                                    fontWeight = FontWeight.Black,
+                                                    fontSize = 52.sp,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                            inner()
+                                        }
+                                    },
+                                    modifier = Modifier.width(240.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // ── Category Grid ─────────────────────────────────────────
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Text(
+                            text = "CATEGORY",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        val gridCategories = quickCategories.take(12)
+                        // 4 columns grid
+                        gridCategories.chunked(4).forEach { row ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                row.forEach { cat ->
+                                    val isSelected = selectedCategory == cat
+                                    val catColor = colorForCategory(cat)
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(
+                                                if (isSelected) catColor.copy(alpha = 0.20f)
+                                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                            )
+                                            .border(
+                                                width = if (isSelected) 1.5.dp else 0.dp,
+                                                color = if (isSelected) catColor else Color.Transparent,
+                                                shape = RoundedCornerShape(14.dp)
+                                            )
+                                            .clickable { selectedCategory = cat }
+                                            .padding(vertical = 10.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = iconForCategory(cat),
+                                            contentDescription = null,
+                                            tint = if (isSelected) catColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Text(
+                                            text = cat,
+                                            fontSize = 9.sp,
+                                            color = if (isSelected) catColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                // pad remaining cells in the last row
+                                repeat(4 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // ── Fields ────────────────────────────────────────────────
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Merchant
+                        OutlinedTextField(
+                            value = merchant,
+                            onValueChange = { merchant = it },
+                            label = { Text("Merchant / Description") },
+                            leadingIcon = { Icon(Icons.Rounded.Storefront, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentPurple,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                            )
+                        )
+                        // Bank / source
+                        OutlinedTextField(
+                            value = bank,
+                            onValueChange = { bank = it },
+                            label = { Text("Bank / Source") },
+                            leadingIcon = { Icon(Icons.Rounded.AccountBalance, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentPurple,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                            )
+                        )
+                        // Note (optional)
+                        OutlinedTextField(
+                            value = note,
+                            onValueChange = { note = it },
+                            label = { Text("Note (optional)") },
+                            leadingIcon = { Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentPurple,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // ── Action Buttons ────────────────────────────────────────
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                        ) {
+                            Text("Cancel", fontWeight = FontWeight.SemiBold)
+                        }
+                        Button(
+                            onClick = {
+                                val amt = rawAmount.toDoubleOrNull() ?: return@Button
+                                onSave(
+                                    amt,
+                                    if (isExpense) TransactionType.DEBIT else TransactionType.CREDIT,
+                                    merchant.ifBlank { "Manual Entry" },
+                                    bank.ifBlank { "SpendWise" },
+                                    selectedCategory,
+                                    note
+                                )
+                            },
+                            enabled = canSave,
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isExpense) AccentPink else AccentGreen,
+                                contentColor = Color.White,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        ) {
+                            Icon(Icons.Rounded.Check, null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isExpense) "Add Expense" else "Add Income",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val numericAmount = amount.toDoubleOrNull() ?: return@TextButton
-                onSave(
-                    numericAmount,
-                    if (selectedTypeIndex == 0) TransactionType.DEBIT else TransactionType.CREDIT,
-                    merchant.ifBlank { "Manual Entry" },
-                    bank.ifBlank { "SpendWise" }
-                )
-            }) {
-                Text("Save")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
+        }
+    }
 }
 
 private fun iconForCategory(category: String) = when (category) {
