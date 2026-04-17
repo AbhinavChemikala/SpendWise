@@ -152,6 +152,22 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import kotlin.math.roundToInt
+import kotlin.math.pow
+import androidx.compose.ui.layout.onSizeChanged
+
+
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.geometry.CornerRadius
+
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -1357,13 +1373,7 @@ private fun InsightsScreen(
         item { RecurringInsightsCard(uiState.recurringInsights, title = "Subscriptions & Recurring") }
         item { DuplicateInsightsCard(uiState.duplicateInsights) }
         item {
-            TrendCard(
-                trend = uiState.trend,
-                selectedIndex = selectedTrendIndex,
-                onSelected = { selectedTrendIndex = it },
-                latestSpent = uiState.totalSpent,
-                latestIncome = uiState.totalReceived
-            )
+            IncomeVsExpenseChart(trend = uiState.trend)
         }
     }
 }
@@ -6577,5 +6587,259 @@ private fun CustomDateRangeDialog(
             state = dateRangePickerState,
             modifier = Modifier.weight(1f)
         )
+    }
+}
+
+@Composable
+private fun IncomeVsExpenseChart(trend: List<TrendPoint>) {
+    var hoveredIndex by remember { mutableStateOf<Int?>(null) }
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Income vs Expense", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text("Last 6 months trend", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            }
+
+            if (trend.isEmpty()) {
+                EmptyStateCard("Not enough data for a trend.")
+                return@Column
+            }
+
+            val maxExpense = trend.maxOfOrNull { it.expense } ?: 0.0
+            val maxIncome = trend.maxOfOrNull { it.income } ?: 0.0
+            val globalMax = maxOf(maxExpense, maxIncome).coerceAtLeast(10.0)
+
+            val steps = 4
+            val rawStep = globalMax / steps
+            val magnitude = Math.pow(10.0, kotlin.math.floor(kotlin.math.log10(rawStep))).coerceAtLeast(1.0)
+            val stepSize = kotlin.math.ceil(rawStep / magnitude) * magnitude
+            val graphMax = stepSize * steps
+
+            val yLabels = (0..steps).map { i ->
+                val v = i * stepSize
+                if (v >= 1000) "${(v / 1000).toInt()}k" else v.toInt().toString()
+            }.reversed()
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(260.dp)
+            ) {
+                var componentWidth by remember { mutableStateOf(0f) }
+
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onSizeChanged { componentWidth = it.width.toFloat() }
+                        .pointerInput(trend) {
+                            detectDragGestures(
+                                onDragEnd = { hoveredIndex = null },
+                                onDragCancel = { hoveredIndex = null }
+                            ) { change, _ ->
+                                val paddingLeft = 40.dp.toPx()
+                                val chartWidth = componentWidth - paddingLeft
+                                val widthStep = chartWidth / (trend.size - 1).coerceAtLeast(1).toFloat()
+                                val xPos = change.position.x - paddingLeft
+                                val index = (xPos / widthStep).roundToInt().coerceIn(0, trend.lastIndex)
+                                hoveredIndex = index
+                            }
+                        }
+                        .pointerInput(trend) {
+                            detectTapGestures(
+                                onTap = { offset ->
+                                    val paddingLeft = 40.dp.toPx()
+                                    val chartWidth = componentWidth - paddingLeft
+                                    val widthStep = chartWidth / (trend.size - 1).coerceAtLeast(1).toFloat()
+                                    val xPos = offset.x - paddingLeft
+                                    val index = (xPos / widthStep).roundToInt().coerceIn(0, trend.lastIndex)
+                                    hoveredIndex = if (hoveredIndex == index) null else index
+                                }
+                            )
+                        }
+                ) {
+                    val paddingLeft = 40.dp.toPx()
+                    val paddingBottom = 30.dp.toPx()
+                    val chartWidth = size.width - paddingLeft
+                    val chartHeight = size.height - paddingBottom
+                    val widthStep = if (trend.size <= 1) chartWidth else chartWidth / (trend.size - 1)
+                    val yStepPx = chartHeight / steps
+
+                    // 1. Draw Grid and Y-axis 
+                    val dashPathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                    val gridColor = Color.Gray.copy(alpha = 0.2f)
+                    val labelStyle = androidx.compose.ui.text.TextStyle(color = Color.Gray, fontSize = 11.sp)
+
+                    yLabels.forEachIndexed { i, label ->
+                        val y = i * yStepPx
+                        drawText(
+                            textMeasurer = textMeasurer,
+                            text = label,
+                            style = labelStyle,
+                            topLeft = Offset(0f, y - 8.dp.toPx())
+                        )
+                        drawLine(
+                            color = gridColor,
+                            start = Offset(paddingLeft, y),
+                            end = Offset(size.width, y),
+                            strokeWidth = 2f,
+                            pathEffect = dashPathEffect
+                        )
+                    }
+
+                    // 2. Draw X-axis labels and vertical grids
+                    trend.forEachIndexed { index, point ->
+                        val x = paddingLeft + (index * widthStep)
+                        drawText(
+                            textMeasurer = textMeasurer,
+                            text = point.monthLabel.take(3),
+                            style = labelStyle,
+                            topLeft = Offset(x - 10.dp.toPx(), chartHeight + 8.dp.toPx())
+                        )
+                        drawLine(
+                            color = gridColor,
+                            start = Offset(x, 0f),
+                            end = Offset(x, chartHeight),
+                            strokeWidth = 2f,
+                            pathEffect = dashPathEffect
+                        )
+                    }
+
+                    // 3. Helper to draw smooth path
+                    fun buildPath(values: List<Double>): Path {
+                        val path = Path()
+                        val pointsPx = values.mapIndexed { index, value ->
+                            val x = paddingLeft + (index * widthStep)
+                            val normalized = (value / graphMax).toFloat()
+                            val y = chartHeight - (normalized * chartHeight)
+                            Offset(x, y)
+                        }
+
+                        if (pointsPx.isEmpty()) return path
+                        path.moveTo(pointsPx.first().x, pointsPx.first().y)
+
+                        for (i in 0 until pointsPx.size - 1) {
+                            val p0 = pointsPx[i]
+                            val p1 = pointsPx[i + 1]
+                            // Cubic bezier magic
+                            val controlX = (p0.x + p1.x) / 2
+                            path.cubicTo(
+                                x1 = controlX, y1 = p0.y,
+                                x2 = controlX, y2 = p1.y,
+                                x3 = p1.x, y3 = p1.y
+                            )
+                        }
+                        return path
+                    }
+
+                    // 4. Draw Income Curve
+                    val incomeColor = AccentTeal
+                    val incomeValues = trend.map { it.income }
+                    val incomePath = buildPath(incomeValues)
+
+                    val incomeFillPath = Path().apply {
+                        addPath(incomePath)
+                        lineTo(paddingLeft + chartWidth, chartHeight)
+                        lineTo(paddingLeft, chartHeight)
+                        close()
+                    }
+                    drawPath(
+                        path = incomeFillPath,
+                        brush = Brush.verticalGradient(listOf(incomeColor.copy(alpha = 0.2f), Color.Transparent), endY = chartHeight)
+                    )
+                    drawPath(path = incomePath, color = incomeColor, style = Stroke(width = 5f, cap = StrokeCap.Round))
+
+                    // 5. Draw Expense Curve
+                    val expenseColor = AccentPurple
+                    val expenseValues = trend.map { it.expense }
+                    val expensePath = buildPath(expenseValues)
+
+                    val expenseFillPath = Path().apply {
+                        addPath(expensePath)
+                        lineTo(paddingLeft + chartWidth, chartHeight)
+                        lineTo(paddingLeft, chartHeight)
+                        close()
+                    }
+                    drawPath(
+                        path = expenseFillPath,
+                        brush = Brush.verticalGradient(listOf(expenseColor.copy(alpha = 0.2f), Color.Transparent), endY = chartHeight)
+                    )
+                    drawPath(path = expensePath, color = expenseColor, style = Stroke(width = 5f, cap = StrokeCap.Round))
+
+                    // 6. Draw Hover Tooltip
+                    hoveredIndex?.let { index ->
+                        val xPos = paddingLeft + (index * widthStep)
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.7f),
+                            start = Offset(xPos, 0f),
+                            end = Offset(xPos, chartHeight),
+                            strokeWidth = 3f
+                        )
+
+                        val incomeY = chartHeight - ((incomeValues[index] / graphMax).toFloat() * chartHeight)
+                        drawCircle(Color.White, radius = 12f, center = Offset(xPos, incomeY))
+                        drawCircle(incomeColor, radius = 8f, center = Offset(xPos, incomeY))
+
+                        val expenseY = chartHeight - ((expenseValues[index] / graphMax).toFloat() * chartHeight)
+                        drawCircle(Color.White, radius = 12f, center = Offset(xPos, expenseY))
+                        drawCircle(expenseColor, radius = 8f, center = Offset(xPos, expenseY))
+
+                        // Tooltip Box
+                        val tooltipText = buildAnnotatedString {
+                            withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.Bold)) {
+                                append(trend[index].monthLabel)
+                                append("\n")
+                            }
+                            withStyle(SpanStyle(color = incomeColor, fontSize = 12.sp)) {
+                                append("● ₹${formatRupees(trend[index].income).replace("₹", "").trim()}\n")
+                            }
+                            withStyle(SpanStyle(color = expenseColor, fontSize = 12.sp)) {
+                                append("● ₹${formatRupees(trend[index].expense).replace("₹", "").trim()}")
+                            }
+                        }
+
+                        val textLayoutResult = textMeasurer.measure(tooltipText)
+                        val tooltipWidth = textLayoutResult.size.width + 32f
+                        val tooltipHeight = textLayoutResult.size.height + 24f
+
+                        // Keep tooltip in bounds
+                        val tipX = if (xPos + tooltipWidth + 20f > size.width) xPos - tooltipWidth - 20f else xPos + 20f
+                        val tipY = (incomeY + expenseY) / 2f - (tooltipHeight / 2f)
+
+                        drawRoundRect(
+                            color = Color(0xFF1E2128), // Dark tooltip bg
+                            topLeft = Offset(tipX, tipY),
+                            size = androidx.compose.ui.geometry.Size(tooltipWidth, tooltipHeight),
+                            cornerRadius = CornerRadius(24f, 24f)
+                        )
+                        drawText(
+                            textLayoutResult = textLayoutResult,
+                            topLeft = Offset(tipX + 16f, tipY + 12f)
+                        )
+                    }
+                }
+            }
+
+            // Legend
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(AccentTeal))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Income", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                Spacer(modifier = Modifier.width(16.dp))
+                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(AccentPurple))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Expense", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            }
+        }
     }
 }
