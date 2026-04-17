@@ -119,6 +119,8 @@ data class DashboardUiState(
     val isBackupBusy: Boolean = false,
     val homeCardOrder: List<String> = emptyList(),
     val homeHiddenCardIds: Set<String> = emptySet(),
+    val insightsCardOrder: List<String> = emptyList(),
+    val insightsHiddenCardIds: Set<String> = emptySet(),
     val debugPhoneNumber: String = "",
     val customCategories: List<CustomCategory> = emptyList(),
     val transactionRules: List<TransactionRule> = emptyList(),
@@ -166,6 +168,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             backupHistory = repository.getBackupHistory(),
             homeCardOrder = repository.getHomeCardOrder(),
             homeHiddenCardIds = repository.getHiddenHomeCardIds(),
+                insightsCardOrder = repository.getInsightsCardOrder(),
+                insightsHiddenCardIds = repository.getHiddenInsightsCardIds(),
             debugPhoneNumber = repository.getDebugPhoneNumber()
         )
     )
@@ -620,6 +624,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 homeHiddenCardIds = repository.getHiddenHomeCardIds(),
+                insightsCardOrder = repository.getInsightsCardOrder(),
+                insightsHiddenCardIds = repository.getHiddenInsightsCardIds(),
                 debugStatusMessage = "Home card visibility updated."
             )
         }
@@ -1157,6 +1163,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.observeImportSourceEvents().collectLatest { events ->
                 _uiState.update { it.copy(importSourceItems = events) }
             }
+        }
+    }
+
+    fun updateInsightsCardOrder(order: List<String>) {
+        viewModelScope.launch {
+            repository.setInsightsCardOrder(order)
+            _uiState.update { it.copy(insightsCardOrder = repository.getInsightsCardOrder()) }
+        }
+    }
+
+    fun toggleInsightsCardVisibility(cardId: String) {
+        viewModelScope.launch {
+            val currentHidden = repository.getHiddenInsightsCardIds().toMutableSet()
+            if (currentHidden.contains(cardId)) {
+                currentHidden.remove(cardId)
+            } else {
+                currentHidden.add(cardId)
+            }
+            repository.setHiddenInsightsCardIds(currentHidden)
+            _uiState.update { it.copy(insightsHiddenCardIds = repository.getHiddenInsightsCardIds()) }
         }
     }
 }

@@ -148,6 +148,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -265,6 +269,162 @@ private object HomeCardId {
     const val CASHFLOW = "cashflow"
     const val INSIGHTS_PREVIEW = "insights_preview"
     const val RECENT_TRANSACTIONS = "recent_transactions"
+}
+
+
+private object InsightsCardId {
+    const val STATUS = "status"
+    const val QUICK_SUMMARY = "quick_summary"
+    const val FACTS = "facts"
+    const val COMPARE_METRICS = "compare_metrics"
+    const val INCOME_TREND = "income_trend"
+    const val BUDGETS = "budgets"
+    const val ANOMALY_ALERTS = "anomaly_alerts"
+    const val CASHFLOW = "cashflow"
+    const val SPECIAL_TRACKING = "special_tracking"
+    const val BANK_SPLIT = "bank_split"
+    const val SPENDING_BREAKDOWN = "spending_breakdown"
+    const val TOP_CATEGORIES = "top_categories"
+    const val PAYMENT_MODE = "payment_mode"
+    const val MERCHANT_ANALYTICS = "merchant_analytics"
+    const val RECURRING_INSIGHTS = "recurring_insights"
+    const val DUPLICATE_INSIGHTS = "duplicate_insights"
+    const val INCOME_VS_EXPENSE_CHART = "income_vs_expense_chart"
+}
+
+private val InsightsCardLabels = mapOf(
+    InsightsCardId.STATUS to "Status",
+    InsightsCardId.QUICK_SUMMARY to "Summary Ranges",
+    InsightsCardId.FACTS to "Insights & Facts",
+    InsightsCardId.COMPARE_METRICS to "Compare Metrics",
+    InsightsCardId.INCOME_TREND to "Income Trend",
+    InsightsCardId.BUDGETS to "Budgets",
+    InsightsCardId.ANOMALY_ALERTS to "Anomaly Alerts",
+    InsightsCardId.CASHFLOW to "Cashflow Calendar",
+    InsightsCardId.SPECIAL_TRACKING to "Tracked Tags",
+    InsightsCardId.BANK_SPLIT to "Bank Split",
+    InsightsCardId.SPENDING_BREAKDOWN to "Spending Breakdown",
+    InsightsCardId.TOP_CATEGORIES to "Top Categories",
+    InsightsCardId.PAYMENT_MODE to "Payment Modes",
+    InsightsCardId.MERCHANT_ANALYTICS to "Merchant Analytics",
+    InsightsCardId.RECURRING_INSIGHTS to "Subscriptions",
+    InsightsCardId.DUPLICATE_INSIGHTS to "Duplicate Watchlist",
+    InsightsCardId.INCOME_VS_EXPENSE_CHART to "Income vs Expense Chart"
+)
+
+private val DefaultInsightsCardOrder = listOf(
+    InsightsCardId.STATUS,
+    InsightsCardId.QUICK_SUMMARY,
+    InsightsCardId.FACTS,
+    InsightsCardId.COMPARE_METRICS,
+    InsightsCardId.INCOME_TREND,
+    InsightsCardId.BUDGETS,
+    InsightsCardId.ANOMALY_ALERTS,
+    InsightsCardId.CASHFLOW,
+    InsightsCardId.SPECIAL_TRACKING,
+    InsightsCardId.BANK_SPLIT,
+    InsightsCardId.SPENDING_BREAKDOWN,
+    InsightsCardId.TOP_CATEGORIES,
+    InsightsCardId.PAYMENT_MODE,
+    InsightsCardId.MERCHANT_ANALYTICS,
+    InsightsCardId.RECURRING_INSIGHTS,
+    InsightsCardId.DUPLICATE_INSIGHTS,
+    InsightsCardId.INCOME_VS_EXPENSE_CHART
+)
+
+private fun normalizeInsightsCardOrder(order: List<String>): List<String> {
+    val valid = DefaultInsightsCardOrder.toSet()
+    return order
+        .filter { it in valid }
+        .distinct() + DefaultInsightsCardOrder.filterNot { it in order }
+}
+
+private fun normalizeInsightsCardIds(ids: Set<String>): Set<String> {
+    return ids
+        .filter { it in DefaultInsightsCardOrder }
+        .toSet()
+}
+
+@Composable
+private fun EditableInsightsCard(
+    cardId: String,
+    isEditing: Boolean,
+    isVisible: Boolean,
+    order: List<String>,
+    onMove: (List<String>) -> Unit,
+    onToggleVisibility: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    if (!isEditing) {
+        if (isVisible) {
+            content()
+        }
+        return
+    }
+
+    val index = order.indexOf(cardId)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = InsightsCardLabels[cardId] ?: "Unknown",
+                fontWeight = FontWeight.Bold,
+                color = if (isVisible) MaterialTheme.colorScheme.onBackground else Color.Gray,
+                modifier = Modifier.weight(1f)
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onToggleVisibility) {
+                    Icon(
+                        imageVector = if (isVisible) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                        contentDescription = if (isVisible) "Hide" else "Show",
+                        tint = if (isVisible) AccentTeal else Color.Gray
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        if (index > 0) {
+                            val newOrder = order.toMutableList()
+                            newOrder[index] = newOrder[index - 1]
+                            newOrder[index - 1] = cardId
+                            onMove(newOrder)
+                        }
+                    },
+                    enabled = index > 0
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowUp,
+                        contentDescription = "Move Up",
+                        tint = if (index > 0) MaterialTheme.colorScheme.onBackground else Color.Gray
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        if (index < order.size - 1) {
+                            val newOrder = order.toMutableList()
+                            newOrder[index] = newOrder[index + 1]
+                            newOrder[index + 1] = cardId
+                            onMove(newOrder)
+                        }
+                    },
+                    enabled = index < order.size - 1 && index != -1
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "Move Down",
+                        tint = if (index < order.size - 1) MaterialTheme.colorScheme.onBackground else Color.Gray
+                    )
+                }
+            }
+        }
+        Box(modifier = Modifier.alpha(if (isVisible) 1f else 0.5f)) {
+            content()
+        }
+    }
 }
 
 private val DefaultHomeCardOrder = listOf(
@@ -624,7 +784,9 @@ fun SpendWiseApp(vm: MainViewModel) {
                     uiState = uiState,
                     onSelectSummaryRange = vm::selectSummaryRange,
                     onSelectAccountFilter = vm::setSelectedAccountFilter,
-                    onMonthClick = { showMonthPicker = true }
+                    onMonthClick = { showMonthPicker = true },
+                    onUpdateInsightsCardOrder = { vm.updateInsightsCardOrder(it) },
+                    onToggleInsightsCardVisibility = { vm.toggleInsightsCardVisibility(it) }
                 )
 
                 SpendWiseTab.REVIEW_CENTER -> AiReviewScreen(
@@ -1319,21 +1481,51 @@ private fun InsightsScreen(
     uiState: DashboardUiState,
     onSelectSummaryRange: (SummaryRangeType) -> Unit,
     onSelectAccountFilter: (String?) -> Unit,
-    onMonthClick: () -> Unit
+    onMonthClick: () -> Unit,
+    onUpdateInsightsCardOrder: (List<String>) -> Unit,
+    onToggleInsightsCardVisibility: (String) -> Unit
 ) {
     var selectedTrendIndex by rememberSaveable { mutableIntStateOf(0) }
+    var isEditingLayout by rememberSaveable { mutableStateOf(false) }
+
+    val cardOrder = remember(uiState.insightsCardOrder) {
+        normalizeInsightsCardOrder(uiState.insightsCardOrder)
+    }
+    val hiddenCardIds = remember(uiState.insightsHiddenCardIds) {
+        normalizeInsightsCardIds(uiState.insightsHiddenCardIds)
+    }
+    val displayedCardOrder = remember(cardOrder, hiddenCardIds, isEditingLayout) {
+        if (isEditingLayout) cardOrder else cardOrder.filterNot { it in hiddenCardIds }
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
+                item {
             ScreenHeader(
                 title = "Insights",
                 subtitle = "This month",
                 monthLabel = formatMonth(uiState.selectedYear, uiState.selectedMonth),
-                onMonthClick = onMonthClick
+                onMonthClick = onMonthClick,
+                trailingContent = {
+                    IconButton(onClick = { isEditingLayout = !isEditingLayout }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Edit,
+                            contentDescription = if (isEditingLayout) {
+                                "Done editing insights layout"
+                            } else {
+                                "Edit insights layout"
+                            },
+                            tint = if (isEditingLayout) {
+                                AccentPurple
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                }
             )
         }
         item {
@@ -1343,38 +1535,44 @@ private fun InsightsScreen(
                 onSelect = onSelectAccountFilter
             )
         }
-        item { StatusCard(uiState) }
-        item {
-            SummaryRangeCard(
-                selected = uiState.selectedSummaryRange,
-                ranges = uiState.rangeSummaries,
-                onSelect = onSelectSummaryRange
-            )
+        items(displayedCardOrder, key = { it }) { cardId ->
+            EditableInsightsCard(
+                cardId = cardId,
+                isEditing = isEditingLayout,
+                isVisible = cardId !in hiddenCardIds,
+                order = cardOrder,
+                onMove = onUpdateInsightsCardOrder,
+                onToggleVisibility = { onToggleInsightsCardVisibility(cardId) }
+            ) {
+                when (cardId) {
+                    InsightsCardId.STATUS -> StatusCard(uiState)
+                    InsightsCardId.QUICK_SUMMARY -> SummaryRangeCard(
+                        selected = uiState.selectedSummaryRange,
+                        ranges = uiState.rangeSummaries,
+                        onSelect = onSelectSummaryRange
+                    )
+                    InsightsCardId.FACTS -> FactsCard(uiState.insightFacts)
+                    InsightsCardId.COMPARE_METRICS -> CompareMetricsCard(uiState.compareMetrics, uiState.totalSpent, uiState.totalReceived)
+                    InsightsCardId.INCOME_TREND -> IncomeTrendCard(uiState.incomeTrend)
+                    InsightsCardId.BUDGETS -> BudgetProgressCard(uiState.budgetProgress)
+                    InsightsCardId.ANOMALY_ALERTS -> AnomalyAlertsCard(uiState.anomalyAlerts)
+                    InsightsCardId.CASHFLOW -> CashflowCard(uiState.cashflowDays)
+                    InsightsCardId.SPECIAL_TRACKING -> SpecialTrackingCard(uiState)
+                    InsightsCardId.BANK_SPLIT -> BankSplitCard(uiState.bankSplit)
+                    InsightsCardId.SPENDING_BREAKDOWN -> SpendingBreakdownCard(
+                        totalSpent = uiState.totalSpent,
+                        topCategories = uiState.topCategories
+                    )
+                    InsightsCardId.TOP_CATEGORIES -> TopCategoriesCard(uiState.topCategories, uiState.totalSpent)
+                    InsightsCardId.PAYMENT_MODE -> PaymentModeCard(uiState.paymentRails, uiState.totalSpent)
+                    InsightsCardId.MERCHANT_ANALYTICS -> MerchantAnalyticsCard(uiState.topMerchants)
+                    InsightsCardId.RECURRING_INSIGHTS -> RecurringInsightsCard(uiState.recurringInsights, title = "Subscriptions & Recurring")
+                    InsightsCardId.DUPLICATE_INSIGHTS -> DuplicateInsightsCard(uiState.duplicateInsights)
+                    InsightsCardId.INCOME_VS_EXPENSE_CHART -> IncomeVsExpenseChart(trend = uiState.trend)
+                }
+            }
         }
-        item {
-            FactsCard(uiState.insightFacts)
-        }
-        item { CompareMetricsCard(uiState.compareMetrics, uiState.totalSpent, uiState.totalReceived) }
-        item { IncomeTrendCard(uiState.incomeTrend) }
-        item { BudgetProgressCard(uiState.budgetProgress) }
-        item { AnomalyAlertsCard(uiState.anomalyAlerts) }
-        item { CashflowCard(uiState.cashflowDays) }
-        item { SpecialTrackingCard(uiState) }
-        item { BankSplitCard(uiState.bankSplit) }
-        item {
-            SpendingBreakdownCard(
-                totalSpent = uiState.totalSpent,
-                topCategories = uiState.topCategories
-            )
-        }
-        item { TopCategoriesCard(uiState.topCategories, uiState.totalSpent) }
-        item { PaymentModeCard(uiState.paymentRails, uiState.totalSpent) }
-        item { MerchantAnalyticsCard(uiState.topMerchants) }
-        item { RecurringInsightsCard(uiState.recurringInsights, title = "Subscriptions & Recurring") }
-        item { DuplicateInsightsCard(uiState.duplicateInsights) }
-        item {
-            IncomeVsExpenseChart(trend = uiState.trend)
-        }
+
     }
 }
 
@@ -3723,16 +3921,21 @@ private fun CashflowCard(cashflowDays: List<CashflowDay>) {
             if (cashflowDays.isEmpty()) {
                 Text("Daily cashflow will appear once transactions are available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                cashflowDays.forEach { day ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(day.label, fontWeight = FontWeight.Medium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("-${formatCompactCurrency(day.spent)}", color = AccentPink)
-                            Text("+${formatCompactCurrency(day.income)}", color = AccentGreen)
+                Column(
+                    modifier = Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    cashflowDays.forEach { day ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(day.label, fontWeight = FontWeight.Medium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("-${formatCompactCurrency(day.spent)}", color = AccentPink)
+                                Text("+${formatCompactCurrency(day.income)}", color = AccentGreen)
+                            }
                         }
                     }
                 }

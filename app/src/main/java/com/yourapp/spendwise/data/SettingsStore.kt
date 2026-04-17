@@ -210,6 +210,22 @@ class SettingsStore(context: Context) {
     fun setHiddenHomeCardIds(hiddenCardIds: Set<String>) {
         writeList(KEY_HOME_HIDDEN_CARD_IDS, normalizeHomeCardIds(hiddenCardIds.toList()))
     }
+    fun getInsightsCardOrder(): List<String> {
+        val saved = readList<String>(KEY_INSIGHTS_CARD_ORDER)
+        return normalizeInsightsCardOrder(saved)
+    }
+
+    fun setInsightsCardOrder(order: List<String>) {
+        writeList(KEY_INSIGHTS_CARD_ORDER, normalizeInsightsCardOrder(order))
+    }
+
+    fun getHiddenInsightsCardIds(): Set<String> {
+        return normalizeInsightsCardIds(readList<String>(KEY_INSIGHTS_HIDDEN_CARD_IDS)).toSet()
+    }
+
+    fun setHiddenInsightsCardIds(hiddenCardIds: Set<String>) {
+        writeList(KEY_INSIGHTS_HIDDEN_CARD_IDS, normalizeInsightsCardIds(hiddenCardIds.toList()))
+    }
 
     fun getCustomCategories(): List<CustomCategory> {
         return readList<CustomCategory>(KEY_CUSTOM_CATEGORIES)
@@ -352,6 +368,19 @@ class SettingsStore(context: Context) {
             .filter { it in valid }
             .distinct()
     }
+    private fun normalizeInsightsCardOrder(order: List<String>): List<String> {
+        val valid = DEFAULT_INSIGHTS_CARD_ORDER.toSet()
+        return order
+            .filter { it in valid }
+            .distinct() + DEFAULT_INSIGHTS_CARD_ORDER.filterNot { it in order }
+    }
+
+    private fun normalizeInsightsCardIds(ids: List<String>): List<String> {
+        val valid = DEFAULT_INSIGHTS_CARD_ORDER.toSet()
+        return ids
+            .filter { it in valid }
+            .distinct()
+    }
 
     companion object {
         private const val PREFS_NAME = "spendwise_settings"
@@ -382,6 +411,8 @@ class SettingsStore(context: Context) {
         private const val KEY_BACKUP_HISTORY = "backup_history"
         private const val KEY_HOME_CARD_ORDER = "home_card_order"
         private const val KEY_HOME_HIDDEN_CARD_IDS = "home_hidden_card_ids"
+        private const val KEY_INSIGHTS_CARD_ORDER = "insights_card_order"
+        private const val KEY_INSIGHTS_HIDDEN_CARD_IDS = "insights_hidden_card_ids"
 
         private val DEFAULT_HOME_CARD_ORDER = listOf(
             "status",
@@ -394,6 +425,26 @@ class SettingsStore(context: Context) {
             "cashflow",
             "insights_preview",
             "recent_transactions"
+        )
+
+        private val DEFAULT_INSIGHTS_CARD_ORDER = listOf(
+            "status",
+            "quick_summary",
+            "facts",
+            "compare_metrics",
+            "income_trend",
+            "budgets",
+            "anomaly_alerts",
+            "cashflow",
+            "special_tracking",
+            "bank_split",
+            "spending_breakdown",
+            "top_categories",
+            "payment_mode",
+            "merchant_analytics",
+            "recurring_insights",
+            "duplicate_insights",
+            "income_vs_expense_chart"
         )
     }
 }

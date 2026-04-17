@@ -916,6 +916,18 @@ class TransactionRepository(context: Context) {
         settingsStore.setHiddenHomeCardIds(hiddenCardIds)
     }
 
+    fun getInsightsCardOrder(): List<String> = settingsStore.getInsightsCardOrder()
+
+    fun setInsightsCardOrder(order: List<String>) {
+        settingsStore.setInsightsCardOrder(order)
+    }
+
+    fun getHiddenInsightsCardIds(): Set<String> = settingsStore.getHiddenInsightsCardIds()
+
+    fun setHiddenInsightsCardIds(hiddenCardIds: Set<String>) {
+        settingsStore.setHiddenInsightsCardIds(hiddenCardIds)
+    }
+
     fun getDebugPhoneNumber(): String = settingsStore.getDebugPhoneNumber()
 
     fun setDebugPhoneNumber(phoneNumber: String) {
@@ -1506,7 +1518,6 @@ class TransactionRepository(context: Context) {
             .toSortedMap()
             .entries
             .toList()
-            .takeLast(10)
             .map { (date, items) ->
                 CashflowDay(
                     label = "${date.dayOfMonth} ${date.month.name.take(3)}",
