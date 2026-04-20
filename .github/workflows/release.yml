@@ -45,8 +45,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: app/build/outputs/apk/release/*.apk
-          name: SpendWise Build ${{ github.run_number }}
-          tag_name: build-${{ github.run_number }}
+          name: SpendWise v${{ github.run_number }}
+          tag_name: v${{ github.run_number }}
           body: |
             Auto build from push to main
           draft: false

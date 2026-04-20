@@ -2456,6 +2456,12 @@ private fun SettingsScreen(
             }
         }
 
+        // ── ABOUT & UPDATES ──────────────────────────────────────────
+        item { SettingsSectionHeader("ABOUT") }
+        item {
+            UpdateCheckCard()
+        }
+
         // ── DEVELOPER OPTIONS ────────────────────────────────────────
         item { SettingsSectionHeader("DEVELOPER OPTIONS") }
         item {
@@ -2505,6 +2511,173 @@ private fun SettingsScreen(
         }
         item {
             ExpandableReviewCard(title = "SMS source explorer", subtitle = "Imported SMS details.", items = uiState.importSourceItems, expanded = showSourceExplorer, onToggle = { showSourceExplorer = !showSourceExplorer })
+        }
+    }
+}
+
+@Composable
+private fun UpdateCheckCard() {
+    val context   = LocalContext.current
+    val scope     = rememberCoroutineScope()
+
+    val currentVersionCode = remember {
+        context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toInt()
+    }
+    val currentVersionName = remember {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    }
+
+    var isChecking    by remember { mutableStateOf(false) }
+    var isDownloading by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf("") }
+    var updateInfo    by remember { mutableStateOf<com.yourapp.spendwise.update.UpdateManager.ReleaseInfo?>(null) }
+    var errorMessage  by remember { mutableStateOf<String?>(null) }
+
+    // Update dialog
+    if (updateInfo != null) {
+        AlertDialog(
+            onDismissRequest = { if (!isDownloading) updateInfo = null },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = {
+                Column {
+                    Text(
+                        "Update Available 🎉",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "${updateInfo!!.tagName} is ready to install",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "What's new:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        updateInfo!!.releaseNotes.take(400).let {
+                            if (updateInfo!!.releaseNotes.length > 400) "$it..." else it
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (isDownloading && downloadProgress.isNotEmpty()) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(downloadProgress, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (!isDownloading) {
+                            scope.launch {
+                                isDownloading = true
+                                downloadProgress = "Downloading..."
+                                com.yourapp.spendwise.update.UpdateManager.downloadAndInstall(
+                                    context, updateInfo!!.downloadUrl
+                                )
+                                isDownloading = false
+                                downloadProgress = ""
+                                updateInfo = null
+                            }
+                        }
+                    },
+                    enabled = !isDownloading
+                ) {
+                    if (isDownloading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Downloading...")
+                    } else {
+                        Text("Install Update")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!isDownloading) updateInfo = null }) {
+                    Text("Later")
+                }
+            }
+        )
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Icon
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        RoundedCornerShape(12.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.SystemUpdate,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+
+            // Text
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Check for Updates", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    errorMessage ?: "Current: v$currentVersionCode ($currentVersionName)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (errorMessage != null) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            // Button
+            if (isChecking) {
+                CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
+            } else {
+                FilledTonalButton(
+                    onClick = {
+                        errorMessage = null
+                        scope.launch {
+                            isChecking = true
+                            val result = com.yourapp.spendwise.update.UpdateManager.checkForUpdate(currentVersionCode)
+                            isChecking = false
+                            when (result) {
+                                is com.yourapp.spendwise.update.UpdateManager.UpdateCheckResult.UpdateAvailable ->
+                                    updateInfo = result.release
+                                is com.yourapp.spendwise.update.UpdateManager.UpdateCheckResult.UpToDate ->
+                                    Toast.makeText(context, "You're on the latest version!", Toast.LENGTH_SHORT).show()
+                                is com.yourapp.spendwise.update.UpdateManager.UpdateCheckResult.Error ->
+                                    errorMessage = result.message
+                            }
+                        }
+                    }
+                ) {
+                    Text("Check")
+                }
+            }
         }
     }
 }
