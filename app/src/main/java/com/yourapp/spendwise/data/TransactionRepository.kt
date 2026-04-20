@@ -347,7 +347,7 @@ class TransactionRepository(context: Context) {
         note: String = ""
     ) = withContext(Dispatchers.IO) {
         val (lat, lng) = LocationHelper.getLocation(appContext) ?: (null to null)
-        val transaction = TransactionFactory.create(
+        val buildResult = TransactionFactory.build(
             context = appContext,
             amount = amount,
             type = type,
@@ -361,7 +361,8 @@ class TransactionRepository(context: Context) {
             note = note,
             latitude = lat,
             longitude = lng
-        ).let { base ->
+        )
+        val transaction = buildResult.transaction?.let { base ->
             // Override the auto-resolved category with the user's explicit choice
             if (category.isNotBlank() && category != "Other") {
                 base.copy(
@@ -370,7 +371,7 @@ class TransactionRepository(context: Context) {
                     categoryRefinementStatus = CategoryRefinementStatus.SKIPPED_RULE
                 )
             } else base
-        }
+        } ?: return@withContext -2L
         val id = transactionDao.insert(transaction)
         if (id > 0L) {
             scheduleCategoryRefinementIfNeeded(transaction.copy(id = id))

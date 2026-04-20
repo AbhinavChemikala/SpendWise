@@ -22,8 +22,19 @@ object TransactionRuleEngine {
         draft: TransactionDraft,
         rules: List<TransactionRule>
     ): RuleApplicationResult {
-        val matchingRule = rules.firstOrNull { rule -> matches(rule, draft) }
-            ?: return RuleApplicationResult(draft = draft)
+        val matchingExclusionRule = rules.firstOrNull { rule ->
+            rule.excludeFromTracking && matches(rule, draft)
+        }
+        if (matchingExclusionRule != null) {
+            return RuleApplicationResult(
+                draft = draft,
+                matchedRule = matchingExclusionRule,
+                shouldExclude = true
+            )
+        }
+        val matchingRule = rules.firstOrNull { rule ->
+            !rule.excludeFromTracking && matches(rule, draft)
+        } ?: return RuleApplicationResult(draft = draft)
         val enrichedDraft = draft.copy(
             merchant = matchingRule.assignMerchant.ifBlank { draft.merchant },
             bank = matchingRule.assignBank.ifBlank { draft.bank },

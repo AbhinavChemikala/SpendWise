@@ -13,6 +13,7 @@ data class TransactionRule(
     val senderContains: String = "",
     val merchantContains: String = "",
     val smsContains: String = "",
+    val excludeFromTracking: Boolean = false,
     val assignCategory: String = "",
     val assignBank: String = "",
     val assignMerchant: String = ""

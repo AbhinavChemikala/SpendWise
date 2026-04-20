@@ -103,7 +103,7 @@ class SmsProcessor(context: Context) {
                 val type = aiResult.type.toTransactionType()
                 if (type != TransactionType.UNKNOWN && aiResult.amount > 0.0) {
                     val (lat, lng) = LocationCache.pop(pending.body, pending.receivedAt) ?: (null to null)
-                    val transaction = pending.toTransactionEntity(
+                    val buildResult = pending.toTransactionBuildResult(
                         amount = aiResult.amount,
                         type = type,
                         merchant = aiResult.merchant.ifBlank {
@@ -119,6 +119,29 @@ class SmsProcessor(context: Context) {
                         latitude = lat,
                         longitude = lng
                     )
+                    val transaction = buildResult.transaction ?: run {
+                        withContext(Dispatchers.IO) {
+                            pendingSmsDao.deleteById(pending.id)
+                            LocationCache.evict(pending.body, pending.receivedAt)
+                            pending.reviewEventId?.let { eventId ->
+                                reviewDao.updateOutcome(
+                                    eventId = eventId,
+                                    finalStatus = "RULE_SKIPPED",
+                                    transactionId = null,
+                                    aiJson = analysis.rawResponse,
+                                    aiReason = "Skipped by rule: ${buildResult.excludedByRule.ruleDisplayName()}",
+                                    aiEngine = analysis.source,
+                                    debugLog = "${SmsPreFilter.buildDebugLog(pending.sender, pending.body)}\nai=${analysis.rawResponse}\nrule=${buildResult.excludedByRule.ruleDisplayName()}\nfinal=rule_skipped"
+                                )
+                            }
+                        }
+                        SpendWiseNotificationManager.dismiss(
+                            context = appContext,
+                            notificationId = SpendWiseNotificationManager.pendingNotificationId(pending.id)
+                        )
+                        delay(200L)
+                        return@forEachIndexed
+                    }
                     var insertedId = -1L
                     withContext(Dispatchers.IO) {
                         insertedId = transactionDao.insert(transaction)
@@ -226,7 +249,7 @@ class SmsProcessor(context: Context) {
         }
     }
 
-    private fun PendingSmsEntity.toTransactionEntity(
+    private fun PendingSmsEntity.toTransactionBuildResult(
         amount: Double,
         type: TransactionType,
         merchant: String,
@@ -237,7 +260,7 @@ class SmsProcessor(context: Context) {
         aiCardType: String = "",
         latitude: Double? = null,
         longitude: Double? = null
-    ) = TransactionFactory.create(
+    ) = TransactionFactory.build(
         context = appContext,
         amount = amount,
         type = type,
@@ -254,4 +277,8 @@ class SmsProcessor(context: Context) {
         latitude = latitude,
         longitude = longitude
     )
+
+    private fun com.yourapp.spendwise.data.TransactionRule?.ruleDisplayName(): String {
+        return this?.name?.trim()?.takeIf { it.isNotBlank() } ?: "Untitled exclusion rule"
+    }
 }

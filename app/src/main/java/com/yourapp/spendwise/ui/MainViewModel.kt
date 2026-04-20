@@ -860,7 +860,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         note: String = ""
     ) {
         viewModelScope.launch {
-            repository.addManualTransaction(
+            val insertedId = repository.addManualTransaction(
                 amount = amount,
                 type = type,
                 merchant = merchant,
@@ -870,7 +870,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             _uiState.update {
                 it.copy(
-                    debugStatusMessage = "Manual transaction added."
+                    debugStatusMessage = if (insertedId == -2L) {
+                        "Transaction skipped by a matching rule."
+                    } else {
+                        "Manual transaction added."
+                    }
                 )
             }
             loadCurrentMonth()

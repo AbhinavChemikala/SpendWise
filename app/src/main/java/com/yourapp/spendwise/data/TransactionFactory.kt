@@ -5,8 +5,13 @@ import com.yourapp.spendwise.data.db.TransactionEntity
 import com.yourapp.spendwise.data.db.TransactionType
 import com.yourapp.spendwise.sms.AccountLabelExtractor
 
+data class TransactionBuildResult(
+    val transaction: TransactionEntity?,
+    val excludedByRule: TransactionRule? = null
+)
+
 object TransactionFactory {
-    fun create(
+    fun build(
         context: Context,
         amount: Double,
         type: TransactionType,
@@ -24,7 +29,7 @@ object TransactionFactory {
         aiCardType: String = "",
         latitude: Double? = null,
         longitude: Double? = null
-    ): TransactionEntity {
+    ): TransactionBuildResult {
         val settingsStore = SettingsStore(context.applicationContext)
         val now = System.currentTimeMillis()
         val safeMerchant = MerchantNormalizer.normalize(merchant, rawSms)
@@ -44,47 +49,131 @@ object TransactionFactory {
             ),
             rules = settingsStore.getRules()
         )
+        if (ruleResult.shouldExclude) {
+            return TransactionBuildResult(
+                transaction = null,
+                excludedByRule = ruleResult.matchedRule
+            )
+        }
         val enrichedDraft = ruleResult.draft
         val matchedRule = ruleResult.matchedRule
-        return TransactionEntity(
-            amount = amount,
-            type = type,
-            merchant = enrichedDraft.merchant,
-            bank = enrichedDraft.bank,
-            rawSms = rawSms,
-            sourceSender = sourceSender,
-            timestamp = timestamp,
-            isVerifiedByAi = isVerifiedByAi,
-            category = enrichedDraft.category,
-            note = note,
-            tags = tags,
-            verificationSource = verificationSource,
-            aiReason = aiReason,
-            paymentMode = PaymentModeResolver.resolve(
+        return TransactionBuildResult(
+            transaction = TransactionEntity(
+                amount = amount,
+                type = type,
+                merchant = enrichedDraft.merchant,
+                bank = enrichedDraft.bank,
                 rawSms = rawSms,
-                merchant = enrichedDraft.merchant
-            ),
-            accountLabel = AccountLabelExtractor.extract(
-                sender    = sourceSender,
-                body      = rawSms,
-                bank      = enrichedDraft.bank,
-                aiCardLast4 = aiCardLast4,
-                aiCardType  = aiCardType
-            ),
-            updatedAt = now,
-            categoryDecisionSource = if (matchedRule != null) {
-                CategoryDecisionSource.RULE
-            } else {
-                CategoryDecisionSource.RESOLVER
-            },
-            categoryRefinementStatus = if (matchedRule != null) {
-                CategoryRefinementStatus.SKIPPED_RULE
-            } else {
-                CategoryRefinementStatus.PENDING
-            },
-            categoryRuleName = matchedRule?.name?.trim().orEmpty(),
-            latitude = latitude,
-            longitude = longitude
+                sourceSender = sourceSender,
+                timestamp = timestamp,
+                isVerifiedByAi = isVerifiedByAi,
+                category = enrichedDraft.category,
+                note = note,
+                tags = tags,
+                verificationSource = verificationSource,
+                aiReason = aiReason,
+                paymentMode = PaymentModeResolver.resolve(
+                    rawSms = rawSms,
+                    merchant = enrichedDraft.merchant
+                ),
+                accountLabel = AccountLabelExtractor.extract(
+                    sender    = sourceSender,
+                    body      = rawSms,
+                    bank      = enrichedDraft.bank,
+                    aiCardLast4 = aiCardLast4,
+                    aiCardType  = aiCardType
+                ),
+                updatedAt = now,
+                categoryDecisionSource = if (matchedRule != null) {
+                    CategoryDecisionSource.RULE
+                } else {
+                    CategoryDecisionSource.RESOLVER
+                },
+                categoryRefinementStatus = if (matchedRule != null) {
+                    CategoryRefinementStatus.SKIPPED_RULE
+                } else {
+                    CategoryRefinementStatus.PENDING
+                },
+                categoryRuleName = matchedRule?.name?.trim().orEmpty(),
+                latitude = latitude,
+                longitude = longitude
+            )
         )
     }
+
+    fun createOrNull(
+        context: Context,
+        amount: Double,
+        type: TransactionType,
+        merchant: String,
+        bank: String,
+        rawSms: String,
+        sourceSender: String,
+        timestamp: Long,
+        isVerifiedByAi: Boolean,
+        note: String = "",
+        tags: String = "",
+        verificationSource: String = if (isVerifiedByAi) "Gemini Nano" else "Prefilter",
+        aiReason: String = "",
+        aiCardLast4: String = "",
+        aiCardType: String = "",
+        latitude: Double? = null,
+        longitude: Double? = null
+    ): TransactionEntity? = build(
+        context = context,
+        amount = amount,
+        type = type,
+        merchant = merchant,
+        bank = bank,
+        rawSms = rawSms,
+        sourceSender = sourceSender,
+        timestamp = timestamp,
+        isVerifiedByAi = isVerifiedByAi,
+        note = note,
+        tags = tags,
+        verificationSource = verificationSource,
+        aiReason = aiReason,
+        aiCardLast4 = aiCardLast4,
+        aiCardType = aiCardType,
+        latitude = latitude,
+        longitude = longitude
+    ).transaction
+
+    fun create(
+        context: Context,
+        amount: Double,
+        type: TransactionType,
+        merchant: String,
+        bank: String,
+        rawSms: String,
+        sourceSender: String,
+        timestamp: Long,
+        isVerifiedByAi: Boolean,
+        note: String = "",
+        tags: String = "",
+        verificationSource: String = if (isVerifiedByAi) "Gemini Nano" else "Prefilter",
+        aiReason: String = "",
+        aiCardLast4: String = "",
+        aiCardType: String = "",
+        latitude: Double? = null,
+        longitude: Double? = null
+    ): TransactionEntity = createOrNull(
+        context = context,
+        amount = amount,
+        type = type,
+        merchant = merchant,
+        bank = bank,
+        rawSms = rawSms,
+        sourceSender = sourceSender,
+        timestamp = timestamp,
+        isVerifiedByAi = isVerifiedByAi,
+        note = note,
+        tags = tags,
+        verificationSource = verificationSource,
+        aiReason = aiReason,
+        aiCardLast4 = aiCardLast4,
+        aiCardType = aiCardType,
+        latitude = latitude,
+        longitude = longitude
+    ) ?: error("Transaction excluded by a matching rule.")
 }

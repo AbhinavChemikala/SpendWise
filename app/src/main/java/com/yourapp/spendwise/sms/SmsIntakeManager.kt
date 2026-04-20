@@ -77,7 +77,7 @@ object SmsIntakeManager {
         if (!isAiReviewEnabled) {
             // Use coords supplied by the caller (snapshotted when the sync job started).
             // This covers the Spark-mail path where one location serves the whole email batch.
-            val transaction = TransactionFactory.create(
+            val buildResult = TransactionFactory.build(
                 context = appContext,
                 amount = amount,
                 type = type,
@@ -91,6 +91,26 @@ object SmsIntakeManager {
                 latitude = latitude,
                 longitude = longitude
             )
+            val transaction = buildResult.transaction ?: run {
+                reviewDao.insert(
+                    SmsReviewEntity(
+                        sender = sender,
+                        body = body,
+                        receivedAt = timestamp,
+                        eventSource = eventSource,
+                        prefilterDecision = "EMAIL_RULE_EXCLUDED",
+                        previewAmount = amount,
+                        previewType = type,
+                        previewMerchant = resolvedMerchant,
+                        previewBank = resolvedBank,
+                        finalStatus = "RULE_SKIPPED",
+                        aiReason = "Skipped by rule: ${buildResult.excludedByRule.ruleDisplayName()}",
+                        debugLog = "$debugLog\nrule=${buildResult.excludedByRule.ruleDisplayName()}\nfinal=rule_skipped"
+                    )
+                )
+                LocationCache.evict(body, timestamp)
+                return@withContext SmsIntakeOutcome.Discarded
+            }
             val insertedId = transactionDao.insert(transaction)
             if (insertedId != -1L) {
                 TransactionCategoryRefinementWorker.enqueue(appContext, insertedId)
@@ -228,7 +248,7 @@ object SmsIntakeManager {
         when (val result = SmsPreFilter.evaluate(sender, body)) {
             is PreFilterResult.Confident -> {
                 val (lat, lng) = LocationCache.pop(body, timestamp) ?: (null to null)
-                val transaction = TransactionFactory.create(
+                val buildResult = TransactionFactory.build(
                     context = appContext,
                     amount = result.amount,
                     type = result.type,
@@ -242,6 +262,26 @@ object SmsIntakeManager {
                     latitude = lat,
                     longitude = lng
                 )
+                val transaction = buildResult.transaction ?: run {
+                    reviewDao.insert(
+                        SmsReviewEntity(
+                            sender = sender,
+                            body = body,
+                            receivedAt = timestamp,
+                            eventSource = eventSource,
+                            prefilterDecision = "RULE_EXCLUDED",
+                            previewAmount = inspection.amount ?: 0.0,
+                            previewType = inspection.type,
+                            previewMerchant = inspection.merchant,
+                            previewBank = inspection.bank,
+                            finalStatus = "RULE_SKIPPED",
+                            aiReason = "Skipped by rule: ${buildResult.excludedByRule.ruleDisplayName()}",
+                            debugLog = "$debugLog\nrule=${buildResult.excludedByRule.ruleDisplayName()}\nfinal=rule_skipped"
+                        )
+                    )
+                    LocationCache.evict(body, timestamp)
+                    return@withContext SmsIntakeOutcome.Discarded
+                }
                 val insertedId = transactionDao.insert(transaction)
                 if (insertedId != -1L) {
                     TransactionCategoryRefinementWorker.enqueue(appContext, insertedId)
@@ -283,7 +323,7 @@ object SmsIntakeManager {
             PreFilterResult.NeedsAiReview -> {
                 if (!isAiReviewEnabled) {
                     val (lat, lng) = LocationCache.pop(body, timestamp) ?: (null to null)
-                    val transaction = TransactionFactory.create(
+                    val buildResult = TransactionFactory.build(
                         context = appContext,
                         amount = inspection.amount ?: 0.0,
                         type = inspection.type ?: com.yourapp.spendwise.data.db.TransactionType.DEBIT,
@@ -297,6 +337,26 @@ object SmsIntakeManager {
                         latitude = lat,
                         longitude = lng
                     )
+                    val transaction = buildResult.transaction ?: run {
+                        reviewDao.insert(
+                            SmsReviewEntity(
+                                sender = sender,
+                                body = body,
+                                receivedAt = timestamp,
+                                eventSource = eventSource,
+                                prefilterDecision = "RULE_EXCLUDED",
+                                previewAmount = inspection.amount ?: 0.0,
+                                previewType = inspection.type,
+                                previewMerchant = inspection.merchant,
+                                previewBank = inspection.bank,
+                                finalStatus = "RULE_SKIPPED",
+                                aiReason = "Skipped by rule: ${buildResult.excludedByRule.ruleDisplayName()}",
+                                debugLog = "$debugLog\nrule=${buildResult.excludedByRule.ruleDisplayName()}\nfinal=rule_skipped"
+                            )
+                        )
+                        LocationCache.evict(body, timestamp)
+                        return@withContext SmsIntakeOutcome.Discarded
+                    }
                     val insertedId = transactionDao.insert(transaction)
                     if (insertedId != -1L) {
                         TransactionCategoryRefinementWorker.enqueue(appContext, insertedId)
@@ -398,5 +458,9 @@ object SmsIntakeManager {
                 SmsIntakeOutcome.Discarded
             }
         }
+    }
+
+    private fun com.yourapp.spendwise.data.TransactionRule?.ruleDisplayName(): String {
+        return this?.name?.trim()?.takeIf { it.isNotBlank() } ?: "Untitled exclusion rule"
     }
 }

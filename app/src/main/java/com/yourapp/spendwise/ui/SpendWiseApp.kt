@@ -4490,7 +4490,21 @@ private fun RuleManagementCard(
                                 .padding(14.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(rule.name.ifBlank { "Untitled rule" }, fontWeight = FontWeight.Bold)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(rule.name.ifBlank { "Untitled rule" }, fontWeight = FontWeight.Bold)
+                                if (rule.excludeFromTracking) {
+                                    Text(
+                                        "Don't add",
+                                        color = AccentPink,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            }
                             Text(buildRuleSummary(rule), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = { onEditRule(rule) }) { Text("Edit") }
@@ -4758,6 +4772,7 @@ private fun RuleEditorDialog(
     var senderContains by rememberSaveable(initialRule.id) { mutableStateOf(initialRule.senderContains) }
     var merchantContains by rememberSaveable(initialRule.id) { mutableStateOf(initialRule.merchantContains) }
     var smsContains by rememberSaveable(initialRule.id) { mutableStateOf(initialRule.smsContains) }
+    var excludeFromTracking by rememberSaveable(initialRule.id) { mutableStateOf(initialRule.excludeFromTracking) }
     var assignCategory by rememberSaveable(initialRule.id) { mutableStateOf(initialRule.assignCategory) }
     var assignBank by rememberSaveable(initialRule.id) { mutableStateOf(initialRule.assignBank) }
     var assignMerchant by rememberSaveable(initialRule.id) { mutableStateOf(initialRule.assignMerchant) }
@@ -4776,9 +4791,49 @@ private fun RuleEditorDialog(
                 OutlinedTextField(senderContains, { senderContains = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Sender contains") })
                 OutlinedTextField(merchantContains, { merchantContains = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Merchant contains") })
                 OutlinedTextField(smsContains, { smsContains = it }, modifier = Modifier.fillMaxWidth(), label = { Text("SMS contains") })
-                OutlinedTextField(assignCategory, { assignCategory = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Assign category") })
-                OutlinedTextField(assignBank, { assignBank = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Assign bank") })
-                OutlinedTextField(assignMerchant, { assignMerchant = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Assign merchant") })
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Don't add matching transaction", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "If this rule matches, SpendWise skips creating the transaction.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(
+                            checked = excludeFromTracking,
+                            onCheckedChange = { excludeFromTracking = it }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    assignCategory,
+                    { assignCategory = it },
+                    enabled = !excludeFromTracking,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Assign category") }
+                )
+                OutlinedTextField(
+                    assignBank,
+                    { assignBank = it },
+                    enabled = !excludeFromTracking,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Assign bank") }
+                )
+                OutlinedTextField(
+                    assignMerchant,
+                    { assignMerchant = it },
+                    enabled = !excludeFromTracking,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Assign merchant") }
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
@@ -4792,9 +4847,10 @@ private fun RuleEditorDialog(
                                     senderContains = senderContains,
                                     merchantContains = merchantContains,
                                     smsContains = smsContains,
-                                    assignCategory = assignCategory,
-                                    assignBank = assignBank,
-                                    assignMerchant = assignMerchant
+                                    excludeFromTracking = excludeFromTracking,
+                                    assignCategory = if (excludeFromTracking) "" else assignCategory,
+                                    assignBank = if (excludeFromTracking) "" else assignBank,
+                                    assignMerchant = if (excludeFromTracking) "" else assignMerchant
                                 )
                             )
                         }
@@ -7262,6 +7318,7 @@ private fun buildRuleSummary(rule: TransactionRule): String {
         rule.smsContains.takeIf { it.isNotBlank() }?.let { "sms has \"$it\"" }
     )
     val actions = listOfNotNull(
+        rule.excludeFromTracking.takeIf { it }?.let { "do not add transaction" },
         rule.assignCategory.takeIf { it.isNotBlank() }?.let { "category → $it" },
         rule.assignBank.takeIf { it.isNotBlank() }?.let { "bank → $it" },
         rule.assignMerchant.takeIf { it.isNotBlank() }?.let { "merchant → $it" }

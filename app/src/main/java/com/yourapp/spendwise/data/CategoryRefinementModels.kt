@@ -27,5 +27,6 @@ data class CategoryResolution(
 
 data class RuleApplicationResult(
     val draft: TransactionDraft,
-    val matchedRule: TransactionRule? = null
+    val matchedRule: TransactionRule? = null,
+    val shouldExclude: Boolean = matchedRule?.excludeFromTracking == true
 )
