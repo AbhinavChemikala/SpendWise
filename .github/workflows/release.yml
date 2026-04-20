@@ -14,6 +14,7 @@ jobs:
       SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       SIGNING_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
       SIGNING_STORE_FILE: ${{ github.workspace }}/release.keystore
+      GITHUB_RUN_NUMBER: ${{ github.run_number }}
 
     steps:
       # 1. Checkout
