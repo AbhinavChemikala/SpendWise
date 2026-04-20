@@ -2,8 +2,7 @@ name: Build & Release APK
 
 on:
   push:
-    tags:
-      - 'v*'          # triggers on tags like v1.0.0, v1.2.3
+    branches: [main]
 
 jobs:
   build:
@@ -46,10 +45,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: app/build/outputs/apk/release/*.apk
-          name: SpendWise ${{ github.ref_name }}
+          name: SpendWise Build ${{ github.run_number }}
+          tag_name: build-${{ github.run_number }}
           body: |
-            ## What's new in ${{ github.ref_name }}
-            - Release build auto-generated from tag
+            Auto build from push to main
           draft: false
           prerelease: false
         env:
