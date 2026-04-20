@@ -15,8 +15,10 @@ android {
         applicationId = "com.yourapp.spendwise"
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        val versionCodeCI = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = versionCodeCI
+        versionName = "v$versionCodeCI"
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         javaCompileOptions {
