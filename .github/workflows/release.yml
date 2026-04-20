@@ -41,6 +41,10 @@ jobs:
           SIGNING_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           SIGNING_STORE_FILE: ${{ github.workspace }}/release.keystore
 
+
+      - name: Print Signing Report
+        run: ./gradlew signingReport
+
       - name: Upload APK to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
