@@ -711,7 +711,9 @@ class TransactionRepository(context: Context) {
     }
 
     suspend fun importExistingSms(
-        onProgress: (processed: Int, total: Int) -> Unit
+        onProgress: (processed: Int, total: Int) -> Unit,
+        onMessage: ((sender: String, bodySnippet: String, outcome: String) -> Unit)? = null,
+        shouldStop: (() -> Boolean)? = null
     ): SmsImportSummary = withContext(Dispatchers.IO) {
         val projection = arrayOf(
             Telephony.Sms.ADDRESS,
@@ -738,6 +740,8 @@ class TransactionRepository(context: Context) {
             var skipped = 0
 
             while (cursor.moveToNext()) {
+                if (shouldStop?.invoke() == true) break
+
                 val sender = cursor.getNullableString(senderIndex).orEmpty().trim()
                 val body = cursor.getNullableString(bodyIndex).orEmpty().trim()
                 val timestamp = cursor.getNullableLong(dateIndex) ?: System.currentTimeMillis()
@@ -747,10 +751,11 @@ class TransactionRepository(context: Context) {
 
                 if (body.isBlank()) {
                     skipped += 1
+                    onMessage?.invoke(sender.take(20), "(empty)", "Skipped")
                     continue
                 }
 
-                when (
+                val outcome = when (
                     SmsIntakeManager.ingest(
                         context = appContext,
                         sender = sender,
@@ -761,10 +766,15 @@ class TransactionRepository(context: Context) {
                         emitPendingEvent = false
                     )
                 ) {
-                    is SmsIntakeOutcome.Confirmed -> importedInstantly += 1
-                    is SmsIntakeOutcome.Pending -> queuedForAi += 1
-                    SmsIntakeOutcome.Discarded -> skipped += 1
+                    is SmsIntakeOutcome.Confirmed -> { importedInstantly += 1; "Added" }
+                    is SmsIntakeOutcome.Pending   -> { queuedForAi += 1;      "AI Queue" }
+                    SmsIntakeOutcome.Discarded    -> { skipped += 1;          "Skipped" }
                 }
+                onMessage?.invoke(
+                    sender.take(24).ifBlank { "Unknown" },
+                    body.take(60).replace('\n', ' '),
+                    outcome
+                )
             }
 
             onProgress(total, total)

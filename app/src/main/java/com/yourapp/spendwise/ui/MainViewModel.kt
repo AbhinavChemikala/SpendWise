@@ -139,7 +139,15 @@ data class DashboardUiState(
     val similarTransactions: List<TransactionEntity> = emptyList(),
     val isScanningLegacyAiFailures: Boolean = false,
     val categoryRefinementRecord: TransactionCategoryAiEntity? = null,
-    val categoryRefinementLoadingId: Long? = null
+    val categoryRefinementLoadingId: Long? = null,
+    val showScanInboxScreen: Boolean = false,
+    val scanLogEntries: List<ScanLogEntry> = emptyList()
+)
+
+data class ScanLogEntry(
+    val sender: String,
+    val bodySnippet: String,
+    val outcome: String  // "Added" | "AI Queue" | "Skipped"
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -177,6 +185,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var transactionsJob: Job? = null
     private var categoryRefinementJob: Job? = null
+    private var smsImportJob: Job? = null
+    private var stopScanRequested = false
     private var isAppInForeground = false
     private var shouldRerunPendingProcessing = false
     private var currentMonthTransactions: List<TransactionEntity> = emptyList()
@@ -948,12 +958,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun importExistingSms() {
-        if (_uiState.value.isImportingSms) {
-            return
-        }
+    fun openScanInboxScreen() {
+        _uiState.update { it.copy(showScanInboxScreen = true) }
+    }
 
-        viewModelScope.launch {
+    fun closeScanInboxScreen() {
+        stopScanRequested = true
+        smsImportJob?.cancel()
+        _uiState.update {
+            it.copy(
+                showScanInboxScreen = false,
+                isImportingSms = false,
+                importProgress = 0 to 0
+            )
+        }
+    }
+
+    fun stopScanSms() {
+        stopScanRequested = true
+    }
+
+    fun resetScanLog() {
+        stopScanRequested = true
+        smsImportJob?.cancel()
+        _uiState.update {
+            it.copy(
+                isImportingSms = false,
+                importProgress = 0 to 0,
+                scanLogEntries = emptyList()
+            )
+        }
+        stopScanRequested = false
+    }
+
+    fun importExistingSms() {
+        if (_uiState.value.isImportingSms) return
+        stopScanRequested = false
+
+        smsImportJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     isImportingSms = true,
@@ -964,11 +1006,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var shouldProcessPending = false
 
             try {
-                val summary = repository.importExistingSms { processed, total ->
-                    _uiState.update { state ->
-                        state.copy(importProgress = processed to total)
-                    }
-                }
+                val summary = repository.importExistingSms(
+                    onProgress = { processed, total ->
+                        _uiState.update { state -> state.copy(importProgress = processed to total) }
+                    },
+                    onMessage = { sender, body, outcome ->
+                        val entry = ScanLogEntry(sender, body, outcome)
+                        _uiState.update { state ->
+                            state.copy(scanLogEntries = state.scanLogEntries + entry)
+                        }
+                    },
+                    shouldStop = { stopScanRequested }
+                )
 
                 shouldProcessPending = summary.queuedForAi > 0 && isAppInForeground
                 val statusMessage = when {
